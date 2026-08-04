@@ -246,7 +246,7 @@
     `;
   }
 
-  function TripsScreen({ state, patch }) {
+  function TripsScreen({ state, patch, session, onSignOut }) {
     return html`
       <div style=${{ height: '100%', overflowY: 'auto', padding: '58px 18px 40px' }}>
         <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 26 }}>
@@ -259,6 +259,53 @@
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           ${state.trips.map(t => tripCard(t, state, patch))}
         </div>
+        ${session ? html`
+          <div style=${{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 22, padding: '0 2px' }}>
+            <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e' }}>synced as ${session.user.email}</span>
+            <button type="button" onClick=${onSignOut} style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#9e9e9e', borderBottom: '1px solid #494949' }}>sign out</button>
+          </div>
+        ` : null}
+      </div>
+    `;
+  }
+
+  // ---------- auth ----------
+
+  function LoadingScreen() {
+    return html`
+      <div style=${{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10 }}>
+        <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 15, letterSpacing: '0.02em', color: '#9e9e9e' }}>(pins)</div>
+      </div>
+    `;
+  }
+
+  function LoginScreen({ authForm, setAuthForm }) {
+    const send = async () => {
+      const email = authForm.email.trim();
+      if (!email || authForm.sending) return;
+      setAuthForm(f => ({ ...f, sending: true, error: '' }));
+      try {
+        await window.PinsSync.sendMagicLink(email);
+        setAuthForm(f => ({ ...f, sending: false, sent: true }));
+      } catch (err) {
+        setAuthForm(f => ({ ...f, sending: false, error: (err && err.message) || 'could not send that — try again' }));
+      }
+    };
+    return html`
+      <div style=${{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 24px' }}>
+        <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 15, letterSpacing: '0.02em', marginBottom: 20 }}>(pins)</div>
+        <h1 style=${{ fontSize: 32, lineHeight: 1.05, letterSpacing: '-0.6px', fontWeight: 600, textTransform: 'lowercase', margin: '0 0 10px' }}>sync your trips</h1>
+        ${authForm.sent ? html`
+          <p style=${{ fontSize: 15, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 6px' }}>check your email — tap the link we sent to <strong style=${{ color: '#fff' }}>${authForm.email}</strong> on this device to finish signing in.</p>
+          <button type="button" onClick=${() => setAuthForm(f => ({ ...f, sent: false }))} style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, color: '#9e9e9e', marginTop: 10, textAlign: 'left' }}>use a different email</button>
+        ` : html`
+          <p style=${{ fontSize: 15, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 20px' }}>enter your email — we'll send a link that signs you in on this device, so your trips follow you to your phone, laptop, wherever.</p>
+          <input value=${authForm.email} onChange=${(e) => setAuthForm(f => ({ ...f, email: e.target.value }))} placeholder="you@example.com" type="email"
+            style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: '13px 15px', fontSize: 16, marginBottom: 12 }}/>
+          ${authForm.error ? html`<p style=${{ fontSize: 13, color: '#f62350', margin: '0 0 12px' }}>${authForm.error}</p>` : null}
+          <button type="button" onClick=${send}
+            style=${{ width: '100%', background: authForm.email.trim() ? '#fff' : '#1e1e1e', color: authForm.email.trim() ? '#131313' : '#737373', borderRadius: 999, padding: 15, fontSize: 16, fontWeight: 500, textTransform: 'lowercase' }}>${authForm.sending ? 'sending…' : 'send magic link'}</button>
+        `}
       </div>
     `;
   }
@@ -952,6 +999,59 @@
       S.save({ trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay });
     }, [state.trips, state.spots, state.stays, state.activeStay]);
 
+    // ---- cross-device sync (Supabase) ----
+    const syncOn = window.PinsSync.isConfigured();
+    const [session, setSession] = useState(syncOn ? undefined : null); // undefined = checking, null = signed out
+    const [syncReady, setSyncReady] = useState(!syncOn);
+    const [authForm, setAuthForm] = useState({ email: '', sending: false, sent: false, error: '' });
+    const mergedForRef = useRef(null);
+
+    useEffect(() => {
+      if (!syncOn) return;
+      let unsub;
+      window.PinsSync.getSession().then(s => setSession(s));
+      unsub = window.PinsSync.onAuthChange((s) => setSession(s));
+      return () => unsub();
+    }, []);
+
+    useEffect(() => {
+      if (!syncOn || !session || mergedForRef.current === session.user.id) return;
+      mergedForRef.current = session.user.id;
+      (async () => {
+        const remote = await window.PinsSync.loadRemoteState(session.user.id);
+        if (remote) {
+          patch({
+            trips: remote.trips || state.trips,
+            spots: remote.spots || state.spots,
+            stays: remote.stays || state.stays,
+            activeStay: remote.activeStay || state.activeStay
+          });
+        } else {
+          await window.PinsSync.saveRemoteState(session.user.id, {
+            trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay
+          });
+        }
+        setSyncReady(true);
+      })();
+      // eslint-disable-next-line
+    }, [session]);
+
+    useEffect(() => {
+      if (!syncOn || !session || !syncReady) return;
+      const t = setTimeout(() => {
+        window.PinsSync.saveRemoteState(session.user.id, {
+          trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay
+        });
+      }, 800);
+      return () => clearTimeout(t);
+    }, [state.trips, state.spots, state.stays, state.activeStay, session, syncReady]);
+
+    const onSignOut = async () => {
+      await window.PinsSync.signOut();
+      mergedForRef.current = null;
+      setSyncReady(false);
+    };
+
     const mapWrapRef = useRef(null);
     const [mapSize, setMapSize] = useState({ w: 0, h: 0 });
     useEffect(() => {
@@ -999,10 +1099,14 @@
     const onMapWheel = (e) => { e.preventDefault(); patch(prev => zoomBy(prev, mapSize, e.deltaY < 0 ? 1.12 : 0.9)); };
     const onMapClick = () => { if (!draggedRef.current) patch({ sel: null }); };
 
+    if (syncOn && session === undefined) return html`<div className="app-shell">${LoadingScreen()}</div>`;
+    if (syncOn && session === null) return html`<div className="app-shell">${LoginScreen({ authForm, setAuthForm })}</div>`;
+    if (syncOn && !syncReady) return html`<div className="app-shell">${LoadingScreen()}</div>`;
+
     return html`
       <div className="app-shell">
         ${state.screen === 'trips'
-          ? TripsScreen({ state, patch })
+          ? TripsScreen({ state, patch, session, onSignOut })
           : TripScreen({ state, patch, mapWrapRef, mapSize, onMapPointerDown, onMapWheel, onMapClick })}
         ${state.detail ? SpotDetailScreen({ state, patch, bump }) : null}
         ${state.addOpen ? AddSpotSheet({ state, patch }) : null}
