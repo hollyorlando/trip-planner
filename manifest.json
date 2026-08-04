@@ -1,0 +1,13 @@
+{
+  "name": "pins — trip map",
+  "short_name": "pins",
+  "description": "Drop every recommendation you saved onto one map, trip by trip.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#131313",
+  "theme_color": "#131313",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "./icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
