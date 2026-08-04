@@ -134,10 +134,10 @@
 
   function computePins(state, mapSize) {
     const list = filteredSpots(state);
-    const stay = currentStay(state);
+    const staySpotIds = stayList(state).map(s => s.spotId).filter(Boolean);
     const BASE = (mapSize.w || 402) / 1000;
     const sc = BASE * state.zoom;
-    return list.filter(s => !stay || stay.spotId !== s.id).map(s => {
+    return list.filter(s => !staySpotIds.includes(s.id)).map(s => {
       const selq = state.sel === s.id, size = selq ? 36 : 26;
       return {
         id: s.id, spot: s, fill: D.cats[s.c].fill, size, dot: selq ? 9 : 7,
@@ -268,6 +268,8 @@
   function MapView({ state, patch, mapSize, mapWrapRef, onMapPointerDown, onMapWheel, onMapClick }) {
     const trip = state.trips.find(t => t.id === state.tripId);
     const stay = currentStay(state);
+    const stays = stayList(state);
+    const activeStayId = state.activeStay[state.tripId];
     const BASE = (mapSize.w || 402) / 1000;
     const sc = BASE * state.zoom;
     const pins = computePins(state, mapSize);
@@ -295,13 +297,16 @@
               ${p.showLabel ? html`<div style=${{ position: 'absolute', left: '50%', top: p.size / 2 + 7, transform: 'translateX(-50%)', background: '#fff', color: '#131313', padding: '5px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600, letterSpacing: '-0.1px', whiteSpace: 'nowrap', textTransform: 'lowercase', pointerEvents: 'none' }}>${p.name}</div>` : null}
             </div>
           `)}
-          ${stay ? html`
-            <div onClick=${(e) => { e.stopPropagation(); patch({ stayOpen: true }); }}
-              style=${{ position: 'absolute', left: Math.round(state.tx + G.X(stay.ln) * sc), top: Math.round(state.ty + G.Y(stay.la) * sc), transform: 'translate(-50%,-50%)', zIndex: 5, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
-              <div style=${{ width: 34, height: 34, borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 3px 10px rgba(0,0,0,0.6)' }}>${HouseIcon({ size: 19, color: '#131313' })}</div>
-              <div style=${{ background: '#fff', color: '#131313', padding: '4px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, letterSpacing: '-0.1px', whiteSpace: 'nowrap', textTransform: 'lowercase', pointerEvents: 'none' }}>${stay.name}</div>
-            </div>
-          ` : null}
+          ${stays.map(s => {
+            const isActive = s.id === activeStayId;
+            return html`
+              <div key=${s.id} onClick=${(e) => { e.stopPropagation(); patch({ stayOpen: true }); }}
+                style=${{ position: 'absolute', left: Math.round(state.tx + G.X(s.ln) * sc), top: Math.round(state.ty + G.Y(s.la) * sc), transform: 'translate(-50%,-50%)', zIndex: isActive ? 5 : 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                <div style=${{ width: isActive ? 34 : 28, height: isActive ? 34 : 28, borderRadius: 12, background: isActive ? '#fff' : '#131313', border: isActive ? 'none' : '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 3px 10px rgba(0,0,0,0.6)' }}>${HouseIcon({ size: isActive ? 19 : 15, color: isActive ? '#131313' : '#fff' })}</div>
+                <div style=${{ background: isActive ? '#fff' : '#131313', color: isActive ? '#131313' : '#fff', border: isActive ? 'none' : '1px solid #fff', padding: '4px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, letterSpacing: '-0.1px', whiteSpace: 'nowrap', textTransform: 'lowercase', pointerEvents: 'none' }}>${s.name}</div>
+              </div>
+            `;
+          })}
         </div>
 
         ${noMap ? html`
