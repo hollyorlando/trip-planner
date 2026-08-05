@@ -61,7 +61,7 @@
       spots: (saved && saved.spots) || D.seedSpots,
       stays, activeStay,
       sf: { name: '', arr: '3e', spotId: null, start: '', end: '' },
-      f: { name: '', cat: 'restaurant', arr: '3e', addr: '', arrManual: false, pickerOpen: false, url: '', note: '' },
+      f: { name: '', cat: 'restaurant', arr: '3e', addr: '', arrManual: false, pickerOpen: false, url: '', note: '', googleResults: [], googleSearching: false, googlePlace: null },
       nt: { name: '', start: '', end: '' },
       et: { name: '', start: '', end: '' }
     };
@@ -554,7 +554,7 @@
               </div>
               <div style=${{ background: '#1e1e1e', borderRadius: 16, padding: '12px 13px' }}>
                 <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 9.5, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#9e9e9e', marginBottom: 5 }}>hours · price</div>
-                <div style=${{ fontSize: 14, fontWeight: 500, color: d.h ? '#fff' : '#737373', lineHeight: 1.3 }}>${d.h || 'not added yet'}</div>
+                <div style=${{ fontSize: 13, fontWeight: 500, color: d.h ? '#fff' : '#737373', lineHeight: 1.4, whiteSpace: 'pre-line' }}>${d.h || 'not added yet'}</div>
                 <div style=${{ fontSize: 12.5, color: '#b3b3b3' }}>${d.p || 'add a price'}</div>
               </div>
             </div>
@@ -594,7 +594,7 @@
 
   // ---------- add spot sheet ----------
 
-  function AddSpotSheet({ state, patch }) {
+  function AddSpotSheet({ state, patch, bump }) {
     const f = state.f;
     const inferred = G.arrFrom(f.addr);
     const activeArr = f.arrManual ? f.arr : (inferred ? inferred.arr : f.arr);
@@ -605,22 +605,63 @@
     const toggleArrPicker = () => patch({ f: { ...state.f, pickerOpen: !state.f.pickerOpen } });
     const showArrPicker = !inferred || f.pickerOpen;
 
+    const doGoogleSearch = async () => {
+      const q = (f.name + ' ' + (f.addr || '')).trim();
+      if (!q) return;
+      patch(prev => ({ f: { ...prev.f, googleSearching: true, googleResults: [] } }));
+      const results = await window.PinsPlaces.searchPlaces(q);
+      patch(prev => ({ f: { ...prev.f, googleSearching: false, googleResults: results } }));
+    };
+    const pickGoogleResult = (r) => async () => {
+      patch(prev => ({ f: { ...prev.f, googleResults: [], googleSearching: true } }));
+      const details = await window.PinsPlaces.getDetails(r.id);
+      patch(prev => {
+        if (!details) return { f: { ...prev.f, googleSearching: false } };
+        const hit = G.arrFrom(details.address);
+        return {
+          f: {
+            ...prev.f, googleSearching: false, googlePlace: details,
+            addr: details.address || prev.f.addr, arr: hit ? hit.arr : prev.f.arr, arrManual: false
+          }
+        };
+      });
+    };
+    const clearGoogle = () => patch({ f: { ...state.f, googlePlace: null } });
+
     const saveSpot = () => {
       const name = f.name.trim();
       if (!name) return;
-      const base = D.arrs[activeArr] || D.arrs['3e'];
-      const num = parseInt((f.addr.match(/\d{1,4}/) || ['' + (state.spots.length * 7)])[0], 10) || 0;
+      const gp = f.googlePlace;
+      let la, ln;
+      if (gp && gp.la != null && gp.ln != null) {
+        la = gp.la; ln = gp.ln;
+      } else {
+        const base = D.arrs[activeArr] || D.arrs['3e'];
+        const num = parseInt((f.addr.match(/\d{1,4}/) || ['' + (state.spots.length * 7)])[0], 10) || 0;
+        la = base[0] + ((((num * 61) % 100) / 100) - 0.5) * 0.006;
+        ln = base[1] + ((((num * 37) % 100) / 100) - 0.5) * 0.010;
+      }
+      const id = name.toLowerCase() + '-' + state.spots.length;
       const s = {
-        id: name.toLowerCase() + '-' + state.spots.length, idx: state.spots.length, n: name.toLowerCase(),
+        id, idx: state.spots.length, n: name.toLowerCase(),
         c: f.cat, a: activeArr, addr: f.addr.trim() || undefined,
-        la: base[0] + ((((num * 61) % 100) / 100) - 0.5) * 0.006,
-        ln: base[1] + ((((num * 37) % 100) / 100) - 0.5) * 0.010,
-        no: f.note, u: f.url || undefined, t: [], visited: false, trip: state.tripId
+        la, ln, no: f.note, u: f.url || undefined, t: [], visited: false, trip: state.tripId,
+        h: (gp && gp.hours) || undefined, p: (gp && gp.price) || undefined
       };
       patch({
         spots: state.spots.concat([s]), addOpen: false, sel: s.id, detail: s.id,
-        f: { name: '', cat: f.cat, arr: activeArr, addr: '', arrManual: false, pickerOpen: false, url: '', note: '' }
+        f: { name: '', cat: f.cat, arr: activeArr, addr: '', arrManual: false, pickerOpen: false, url: '', note: '', googleResults: [], googleSearching: false, googlePlace: null }
       });
+      if (gp && gp.photoName) {
+        window.PinsPlaces.fetchPhotoBlob(gp.photoName, 800).then(async (blob) => {
+          if (!blob) return;
+          try {
+            const dataUrl = await S.compressImage(blob);
+            S.savePhoto(id, 0, dataUrl);
+            bump();
+          } catch (err) { console.warn('pins: could not save google photo', err); }
+        });
+      }
     };
 
     return html`
@@ -633,7 +674,29 @@
           <div style=${{ flex: 1, overflowY: 'auto', padding: '6px 16px 20px' }}>
             <div style=${MONO_HEADER}>name</div>
             <input value=${f.name} onChange=${setField('name')} placeholder="e.g. du pain et des idées"
-              style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 15, marginBottom: 14 }}/>
+              style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 15, marginBottom: 10 }}/>
+            ${window.PinsPlaces.isConfigured() ? html`
+              ${f.googlePlace ? html`
+                <div style=${{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14, background: '#1e1e1e', borderRadius: 14, padding: '10px 12px' }}>
+                  <span style=${{ fontSize: 13 }}>✓ found on google — photo + hours will be added</span>
+                  <button type="button" onClick=${clearGoogle} style=${{ marginLeft: 'auto', flex: 'none', fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#9e9e9e' }}>clear</button>
+                </div>
+              ` : html`
+                <button type="button" onClick=${doGoogleSearch} disabled=${!f.name.trim() || f.googleSearching}
+                  style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: '10px', fontSize: 13.5, textAlign: 'center', color: f.name.trim() ? '#fff' : '#737373', marginBottom: 14 }}>${f.googleSearching ? 'looking…' : 'look up on google'}</button>
+              `}
+              ${f.googleResults.length ? html`
+                <div style=${{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14, marginTop: -6 }}>
+                  ${f.googleResults.map(r => html`
+                    <button type="button" key=${r.id} onClick=${pickGoogleResult(r)}
+                      style=${{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', border: '1px solid #333333', borderRadius: 12, padding: '9px 11px' }}>
+                      <span style=${{ fontSize: 14, fontWeight: 500 }}>${r.name}</span>
+                      <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e' }}>${r.address}</span>
+                    </button>
+                  `)}
+                </div>
+              ` : null}
+            ` : null}
             <div style=${MONO_HEADER}>category</div>
             <div style=${{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 14 }}>
               ${Object.keys(D.cats).map(k => { const on = f.cat === k; return html`
@@ -1048,7 +1111,7 @@
           ? TripsScreen({ state, patch })
           : TripScreen({ state, patch, mapWrapRef, mapSize, onMapPointerDown, onMapWheel, onMapClick })}
         ${state.detail ? SpotDetailScreen({ state, patch, bump }) : null}
-        ${state.addOpen ? AddSpotSheet({ state, patch }) : null}
+        ${state.addOpen ? AddSpotSheet({ state, patch, bump }) : null}
         ${state.stayOpen ? StaySheet({ state, patch }) : null}
         ${state.newTripOpen ? NewTripSheet({ state, patch }) : null}
         ${state.confirmDeleteTripId ? DeleteTripSheet({ state, patch }) : null}
