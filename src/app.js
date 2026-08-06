@@ -132,6 +132,14 @@
     return { zoom: ns / BASE, tx: cx - (cx - state.tx) * (ns / sc), ty: cy - (cy - state.ty) * (ns / sc) };
   }
 
+  // Re-center the map on one spot without changing zoom (used when picking a spot from the sheet).
+  function centerOnSpot(state, mapSize, s) {
+    const W = mapSize.w || 402, H = mapSize.h || 386;
+    const BASE = W / 1000;
+    const sc = BASE * state.zoom;
+    return { tx: W / 2 - G.X(s.ln) * sc, ty: H / 2 - G.Y(s.la) * sc };
+  }
+
   function computePins(state, mapSize) {
     const list = filteredSpots(state);
     const staySpotIds = stayList(state).map(s => s.spotId).filter(Boolean);
@@ -289,7 +297,11 @@
             </div>
           ` : null}
           ${pins.map(p => html`
-            <div key=${p.id} onClick=${(e) => { e.stopPropagation(); patch({ sel: p.id, expanded: false }); }}
+            <div key=${p.id} onClick=${(e) => {
+              e.stopPropagation();
+              if (state.sel === p.id) patch({ detail: p.id, expanded: false });
+              else patch({ sel: p.id, expanded: false });
+            }}
               style=${{ position: 'absolute', left: p.left, top: p.top, zIndex: p.z, transform: 'translate(-50%,-50%)', cursor: 'pointer' }}>
               <div style=${{ width: p.size, height: p.size, borderRadius: 999, background: p.fill, border: '2.5px solid #131313', boxShadow: '0 2px 8px rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: p.op }}>
                 <div style=${{ width: p.dot, height: p.dot, borderRadius: 999, background: D.cats[p.spot.c].ink, opacity: 0.5 }}/>
@@ -335,22 +347,26 @@
         <button type="button" className="fab-btn" onClick=${() => patch({ addOpen: true })}
           style=${{ position: 'absolute', right: 16, zIndex: 8, bottom: sheetH + 14, width: 56, height: 56, borderRadius: 999, background: '#fff', color: '#131313', fontSize: 28, fontWeight: 400, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
 
-        ${BottomSheet({ state, patch, sheetH, asList, all })}
+        ${BottomSheet({ state, patch, mapSize, sheetH, asList, all })}
       </div>
     `;
   }
 
-  function BottomSheet({ state, patch, sheetH, asList, all }) {
+  function BottomSheet({ state, patch, mapSize, sheetH, asList, all }) {
     const list = filteredSpots(state);
     const sorted = list.slice().sort((a, b) => distanceTo(state, a) - distanceTo(state, b));
-    const selFirst = state.sel ? sorted.slice().sort((a, b) => (b.id === state.sel) - (a.id === state.sel)) : sorted;
     const empty = !all.length;
     const title = empty ? 'this trip is empty'
       : (asList ? list.length + (list.length === 1 ? ' spot' : ' spots') + ' · nearest first'
         : (state.sel ? 'selected' : list.length + (list.length === 1 ? ' spot on this map' : ' spots on this map')));
     const actionLabel = empty ? 'add one' : (asList ? 'collapse' : 'see all');
     const toggleSheet = () => empty ? patch({ addOpen: true }) : patch({ expanded: !state.expanded });
-    const open = (id) => patch({ detail: id, sel: id });
+    // Tapping a spot that isn't selected just highlights + centers it on the map;
+    // tapping it again (already selected) opens the full detail screen.
+    const selectOrOpen = (s) => () => {
+      if (state.sel === s.id) { patch({ detail: s.id }); return; }
+      patch(prev => ({ sel: s.id, ...centerOnSpot(prev, mapSize, s) }));
+    };
 
     return html`
       <div style=${{ position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 7, background: '#131313', borderTop: '1px solid #333333', borderRadius: '24px 24px 0 0', height: sheetH, transition: 'height 280ms cubic-bezier(0.93,0,0.07,1)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -368,8 +384,8 @@
         ` : (asList ? html`
           <div style=${{ flex: 1, overflowY: 'auto', padding: '0 16px 24px' }}>
             ${sorted.map(s => { const d = decorateSpot(s, state); return html`
-              <button type="button" key=${s.id} className="row-hover" onClick=${() => open(s.id)}
-                style=${{ display: 'flex', width: '100%', textAlign: 'left', gap: 12, alignItems: 'flex-start', padding: '11px 0', borderBottom: '1px solid #1e1e1e' }}>
+              <button type="button" key=${s.id} data-spot-id=${s.id} className="row-hover" onClick=${selectOrOpen(s)}
+                style=${{ display: 'flex', width: '100%', textAlign: 'left', gap: 12, alignItems: 'flex-start', padding: '11px 0', borderBottom: '1px solid #1e1e1e', background: s.id === state.sel ? '#1a1a1a' : 'transparent' }}>
                 <div style=${{ width: 32, height: 32, borderRadius: 999, background: d.fill, flex: 'none', marginTop: 2 }}/>
                 <div style=${{ flex: 1, minWidth: 0 }}>
                   <div style=${{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.2px', textTransform: 'lowercase', lineHeight: 1.2 }}>${d.name}</div>
@@ -381,8 +397,8 @@
           </div>
         ` : html`
           <div style=${{ display: 'flex', gap: 10, overflowX: 'auto', padding: '2px 16px 16px', scrollSnapType: 'x mandatory' }}>
-            ${selFirst.map(s => { const d = decorateSpot(s, state); return html`
-              <button type="button" key=${s.id} className="card-hover" onClick=${() => open(s.id)}
+            ${sorted.map(s => { const d = decorateSpot(s, state); return html`
+              <button type="button" key=${s.id} data-spot-id=${s.id} className="card-hover" onClick=${selectOrOpen(s)}
                 style=${{ flex: 'none', width: 224, scrollSnapAlign: 'start', textAlign: 'left', background: '#131313', border: `1px solid ${d.border}`, borderRadius: 18, padding: '12px 13px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style=${{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style=${{ width: 9, height: 9, borderRadius: 999, background: d.fill }}/>
@@ -1064,6 +1080,14 @@
       ro.observe(el);
       return () => ro.disconnect();
     }, [state.screen, state.view]);
+
+    // Selecting a spot (from a map pin or a sheet card) scrolls its matching
+    // card in the pull-up sheet into view, so the two stay in sync either way.
+    useEffect(() => {
+      if (!state.sel) return;
+      const el = document.querySelector(`[data-spot-id="${CSS.escape(state.sel)}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }, [state.sel]);
 
     const fitKeyRef = useRef(null);
     useEffect(() => {
