@@ -44,7 +44,7 @@ window.PinsData = (function () {
   ];
 
   const seed = [
-    { n: "musée d'orsay", c: 'museum', a: '7e', la: 48.8600, ln: 2.3266, no: 'monet, van gogh, degas, renoir. book a skip-the-line guided tour (~2h) so you skip the queue and get context.', u: 'https://www.getyourguide.com', t: ['skip the line', '2 hours'], h: '9:30 – 18:00, closed mon', p: '~€16' },
+    { n: "musée d'orsay", c: 'museum', a: '7e', la: 48.8600, ln: 2.3266, no: "monet, van gogh's starry night over the rhône, degas, renoir. book a skip-the-line guided tour (~2h) so you skip the queue and get context.", u: 'https://www.getyourguide.com', t: ['skip the line', '2 hours'], h: '9:30 – 18:00, closed mon', p: '~€16' },
     { n: "musée de l'orangerie", c: 'museum', a: '1er', la: 48.8638, ln: 2.3226, no: "monet's water lilies, in the round. small enough to do in an hour.", t: ['water lilies', 'quick visit'], h: '9:00 – 18:00, closed tue', p: '~€12.50' },
     { n: 'buddy buddy', c: 'bakery', a: '3e', la: 48.8615, ln: 2.3610, no: 'famous for the peanut butter latte. le marais breakfast.', t: ['peanut butter latte', 'breakfast'] },
     { n: 'mamiche', c: 'bakery', a: '9e', la: 48.8795, ln: 2.3450, no: 'known more for bread and sandwiches than croissants. go for the sandwich.', u: 'https://www.instagram.com/boulangeriemamiche?igsh=d3JwaGdoeTBma3Vs', t: ['bread', 'sandwiches'] },

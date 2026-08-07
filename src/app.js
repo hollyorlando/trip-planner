@@ -525,7 +525,7 @@
 
     const close = () => patch({ detail: null });
     const toggleVisited = () => patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, visited: !s.visited } : s) });
-    const setNote = (e) => { const v = e.target.value; patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, un: v } : s) }); };
+    const setNote = (e) => { const v = e.target.value; patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, no: v } : s) }); };
     const removeSpot = () => patch({ spots: state.spots.filter(s => s.id !== d.id), detail: null, sel: null });
     const setAsStay = () => {
       const existing = stayList(state).find(s => s.spotId === d.id);
@@ -586,18 +586,17 @@
                 <span style=${{ fontSize: 14.5, fontWeight: 500 }}>you're staying here${fmtDateRange(stay.start, stay.end) ? ' · ' + fmtDateRange(stay.start, stay.end) : ''} — distances start from this pin</span>
               </div>
             ` : null}
-            <div style=${{ borderRadius: 20, padding: 14, background: c.soft, marginBottom: 14 }}>
-              <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9 }}>
-                <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#fff' }}>saved from ${G.host(d.u) || 'your notes'}</div>
-              </div>
-              <p style=${{ fontSize: 15.5, lineHeight: 1.4, color: '#fff', margin: '0 0 12px' }}>"${d.no || 'you saved this one without a note.'}"</p>
-              ${d.u ? html`
+            ${d.u ? html`
+              <div style=${{ borderRadius: 20, padding: 14, background: c.soft, marginBottom: 14 }}>
+                <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9 }}>
+                  <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#fff' }}>saved from ${G.host(d.u)}</div>
+                </div>
                 <a href=${d.u} target="_blank" rel="noreferrer" style=${{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', color: '#131313', borderRadius: 999, padding: '9px 15px', fontSize: 13.5, fontWeight: 500, textTransform: 'lowercase' }}>open original ${ExternalLinkIcon()}</a>
-              ` : html`<div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#fff', opacity: 0.7 }}>no link saved — add one when you find it again</div>`}
-            </div>
+              </div>
+            ` : null}
             <div style=${{ marginBottom: 14 }}>
-              <div style=${MONO_HEADER}>your notes</div>
-              <textarea value=${d.un || ''} onChange=${setNote} placeholder="what do you want to order? who told you about it?"
+              <div style=${MONO_HEADER}>notes</div>
+              <textarea value=${d.no || ''} onChange=${setNote} placeholder="what do you want to order? who told you about it?"
                 style=${{ width: '100%', minHeight: 84, resize: 'vertical', border: '1px solid #333333', borderRadius: 16, padding: '12px 13px', fontSize: 14.5, lineHeight: 1.45, background: '#131313' }}/>
             </div>
             <button type="button" onClick=${removeSpot}
