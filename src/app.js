@@ -1066,23 +1066,26 @@
       const t = setTimeout(() => setBootMinElapsed(true), 2350);
       return () => clearTimeout(t);
     }, []);
-    const skipBoot = () => {
-      if (boot !== 'in') return;
-      setBoot('out');
-      setTimeout(() => setBoot(null), 380);
-    };
+    const skipBoot = () => setBoot(b => (b === 'in' ? 'out' : b));
 
     // ---- cross-device sync (Supabase, shared — no login) ----
     const syncOn = window.PinsSync.isConfigured();
     const [syncReady, setSyncReady] = useState(!syncOn);
     const mergedRef = useRef(false);
 
+    // Triggers the fade-out once conditions are met; deliberately excludes `boot`
+    // from deps so it doesn't re-fire (and cancel the effect below) once boot flips to 'out'.
     useEffect(() => {
-      if (boot !== 'in' || !bootMinElapsed || !syncReady) return;
-      setBoot('out');
+      if (!bootMinElapsed || !syncReady) return;
+      setBoot(b => (b === 'in' ? 'out' : b));
+    }, [bootMinElapsed, syncReady]);
+
+    // Removes the boot overlay from the DOM once its fade-out transition finishes.
+    useEffect(() => {
+      if (boot !== 'out') return;
       const t = setTimeout(() => setBoot(null), 370);
       return () => clearTimeout(t);
-    }, [boot, bootMinElapsed, syncReady]);
+    }, [boot]);
 
     useEffect(() => {
       if (!syncOn || mergedRef.current) return;
