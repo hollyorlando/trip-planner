@@ -74,7 +74,7 @@
     const { stays, activeStay } = migrateStays(saved, defaultStay);
     return {
       screen: 'trips', tripId: 'paris', view: 'map', query: '', off: {},
-      sel: null, detail: null, expanded: false, addOpen: false, newTripOpen: false, stayOpen: false,
+      sel: null, selStay: null, detail: null, expanded: false, addOpen: false, newTripOpen: false, stayOpen: false,
       confirmDeleteTripId: null, editTripId: null,
       stayEditId: null, stayEditStart: '', stayEditEnd: '',
       trips: migrateTripLegs((saved && saved.trips) || D.seedTrips),
@@ -347,7 +347,7 @@
     const n = state.spots.filter(s => s.trip === t.id).length;
     const dotKeys = Object.keys(D.cats).filter(k => state.spots.some(s => s.trip === t.id && s.c === k));
     const dots = dotKeys.length ? dotKeys.map(k => D.cats[k].fill) : ['#333333'];
-    const open = () => patch({ screen: 'trip', tripId: t.id, sel: null, expanded: false, query: '', off: {} });
+    const open = () => patch({ screen: 'trip', tripId: t.id, sel: null, selStay: null, expanded: false, query: '', off: {} });
     const askDelete = (e) => { e.stopPropagation(); patch({ confirmDeleteTripId: t.id }); };
     const askEdit = (e) => {
       e.stopPropagation();
@@ -427,12 +427,17 @@
 
     const stayContent = (s) => {
       const isActive = s.id === activeStayId;
+      const isSelected = state.selStay === s.id;
       const dr = stays.length > 1 ? fmtDateRange(s.start, s.end) : '';
       return html`
-        <div onClick=${(e) => { e.stopPropagation(); patch({ stayOpen: true }); }}
+        <div onClick=${(e) => {
+          e.stopPropagation();
+          if (state.selStay === s.id) patch({ stayOpen: true });
+          else patch({ selStay: s.id });
+        }}
           style=${{ position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)', zIndex: isActive ? 5 : 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
           <div style=${{ width: isActive ? 34 : 28, height: isActive ? 34 : 28, borderRadius: 12, background: isActive ? '#fff' : '#131313', border: isActive ? 'none' : '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 3px 10px rgba(0,0,0,0.6)' }}>${HouseIcon({ size: isActive ? 19 : 15, color: isActive ? '#131313' : '#fff' })}</div>
-          <div style=${{ background: isActive ? '#fff' : '#131313', color: isActive ? '#131313' : '#fff', border: isActive ? 'none' : '1px solid #fff', padding: '4px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, letterSpacing: '-0.1px', whiteSpace: 'nowrap', textTransform: 'lowercase' }}>${s.name}${dr ? ' · ' + dr : ''}</div>
+          ${isSelected ? html`<div style=${{ background: isActive ? '#fff' : '#131313', color: isActive ? '#131313' : '#fff', border: isActive ? 'none' : '1px solid #fff', padding: '4px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, letterSpacing: '-0.1px', whiteSpace: 'nowrap', textTransform: 'lowercase' }}>${s.name}${dr ? ' · ' + dr : ''}</div>` : null}
         </div>
       `;
     };
@@ -1244,7 +1249,7 @@
           styles: window.PinsGoogleMaps.DARK_STYLE,
           disableDefaultUI: true, gestureHandling: 'greedy', clickableIcons: false, backgroundColor: '#131313'
         });
-        map.addListener('click', () => patch({ sel: null }));
+        map.addListener('click', () => patch({ sel: null, selStay: null }));
         mapRef.current = map;
         overlayInstancesRef.current = {};
         setOverlayNodes({});
