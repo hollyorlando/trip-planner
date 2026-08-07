@@ -68,6 +68,11 @@ window.PinsGoogleMaps = (function () {
       onRemove() {
         if (this.node.parentNode) this.node.parentNode.removeChild(this.node);
       }
+      // Only the user-location dot moves after being placed; spots/stays are static.
+      updatePosition(position) {
+        this.position = position;
+        this.draw();
+      }
     }
     return new HtmlOverlay();
   }

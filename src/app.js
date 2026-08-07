@@ -394,7 +394,7 @@
 
   // ---------- map view ----------
 
-  function MapView({ state, patch, visible, mapContainerRef, overlayNodes, onZoomIn, onZoomOut, onRecenter }) {
+  function MapView({ state, patch, visible, mapContainerRef, overlayNodes, userLoc, onZoomIn, onZoomOut, onRecenter }) {
     const trip = state.trips.find(t => t.id === state.tripId);
     const stay = currentStay(state);
     const stays = stayList(state);
@@ -410,6 +410,7 @@
     // (see gmaps.js) and portaled here so their contents stay ordinary declarative JSX.
     const pinContent = (s) => {
       const selq = state.sel === s.id, size = selq ? 36 : 26, cat = D.cats[s.c];
+      const km = selq && userLoc && s.la != null && s.ln != null ? G.hav([userLoc.la, userLoc.ln], [s.la, s.ln]) : null;
       return html`
         <div onClick=${(e) => {
           e.stopPropagation();
@@ -420,10 +421,19 @@
           <div style=${{ width: size, height: size, borderRadius: 999, background: cat.fill, border: '2.5px solid #131313', boxShadow: '0 2px 8px rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: s.visited && !selq ? 0.45 : 1 }}>
             <div style=${{ width: selq ? 9 : 7, height: selq ? 9 : 7, borderRadius: 999, background: cat.ink, opacity: 0.5 }}/>
           </div>
-          ${selq ? html`<div style=${{ background: '#fff', color: '#131313', padding: '5px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600, letterSpacing: '-0.1px', whiteSpace: 'nowrap', textTransform: 'lowercase' }}>${s.n}</div>` : null}
+          ${selq ? html`<div style=${{ background: '#fff', color: '#131313', padding: '5px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600, letterSpacing: '-0.1px', whiteSpace: 'nowrap', textTransform: 'lowercase' }}>${s.n}${km != null ? ' · ' + G.fmtKm(km) + ' away' : ''}</div>` : null}
         </div>
       `;
     };
+
+    // A pulsing blue "you are here" dot, positioned like any other overlay marker
+    // but non-interactive since it isn't something the user selects or taps.
+    const meContent = () => html`
+      <div style=${{ position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)', zIndex: 3, pointerEvents: 'none' }}>
+        <div style=${{ position: 'absolute', left: '50%', top: '50%', width: 44, height: 44, marginLeft: -22, marginTop: -22, borderRadius: 999, background: 'rgba(66,133,244,0.35)', animation: 'locPulse 2200ms ease-out infinite' }}/>
+        <div style=${{ width: 16, height: 16, borderRadius: 999, background: '#4285f4', border: '2.5px solid #fff', boxShadow: '0 0 0 1px rgba(0,0,0,0.35), 0 2px 6px rgba(0,0,0,0.5)' }}/>
+      </div>
+    `;
 
     const stayContent = (s) => {
       const isActive = s.id === activeStayId;
@@ -452,6 +462,7 @@
         ${stays.map(s => overlayNodes['stay:' + s.id]
           ? ReactDOM.createPortal(stayContent(s), overlayNodes['stay:' + s.id], s.id)
           : null)}
+        ${overlayNodes.me ? ReactDOM.createPortal(meContent(), overlayNodes.me, 'me') : null}
 
         ${noMap ? html`
           <div style=${{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '0 46px', textAlign: 'center', pointerEvents: 'none' }}>
@@ -597,7 +608,7 @@
     `;
   }
 
-  function TripScreen({ state, patch, mapContainerRef, overlayNodes, onZoomIn, onZoomOut, onRecenter }) {
+  function TripScreen({ state, patch, mapContainerRef, overlayNodes, userLoc, onZoomIn, onZoomOut, onRecenter }) {
     const trip = state.trips.find(t => t.id === state.tripId) || state.trips[0];
     const all = allSpotsForTrip(state);
     const counts = {};
@@ -637,7 +648,7 @@
             })}
           </div>
         </div>
-        ${MapView({ state, patch, mapContainerRef, overlayNodes, onZoomIn, onZoomOut, onRecenter, visible: state.view === 'map' })}
+        ${MapView({ state, patch, mapContainerRef, overlayNodes, userLoc, onZoomIn, onZoomOut, onRecenter, visible: state.view === 'map' })}
         ${ListView({ state, patch, all, visible: state.view === 'list' })}
       </div>
     `;
@@ -1219,6 +1230,18 @@
       return () => clearTimeout(t);
     }, [state.trips, state.spots, state.stays, state.activeStay, syncReady]);
 
+    // ---- user's live location (for the "you are here" map dot + distance-to-pin) ----
+    const [userLoc, setUserLoc] = useState(null);
+    useEffect(() => {
+      if (!navigator.geolocation) return;
+      const id = navigator.geolocation.watchPosition(
+        (pos) => setUserLoc({ la: pos.coords.latitude, ln: pos.coords.longitude }),
+        (err) => console.warn('pins: could not get location', err.message),
+        { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
+      );
+      return () => navigator.geolocation.clearWatch(id);
+    }, []);
+
     // Selecting a spot (from a map pin or a sheet card) scrolls its matching
     // card in the pull-up sheet into view, so the two stay in sync either way.
     useEffect(() => {
@@ -1303,6 +1326,7 @@
       const spots = allSpotsForTrip(state).filter(s => s.la != null && s.ln != null);
       const stays = stayList(state).filter(s => s.la != null && s.ln != null);
       const wanted = new Set([...spots.map(s => 'spot:' + s.id), ...stays.map(s => 'stay:' + s.id)]);
+      if (userLoc) wanted.add('me');
       const inst = overlayInstancesRef.current;
       let changed = false;
       Object.keys(inst).forEach((key) => {
@@ -1317,12 +1341,18 @@
       };
       spots.forEach(s => addOverlay('spot:' + s.id, s.la, s.ln));
       stays.forEach(s => addOverlay('stay:' + s.id, s.la, s.ln));
+      // The "me" dot moves as location updates arrive, unlike static spot/stay pins,
+      // so an existing instance is repositioned in place rather than torn down.
+      if (userLoc) {
+        if (inst.me) inst.me.overlay.updatePosition(new maps.LatLng(userLoc.la, userLoc.ln));
+        else addOverlay('me', userLoc.la, userLoc.ln);
+      }
       if (changed) {
         const next = {};
         Object.keys(inst).forEach((key) => { next[key] = inst[key].node; });
         setOverlayNodes(next);
       }
-    }, [mapReady, state.tripId, state.spots, state.stays]);
+    }, [mapReady, state.tripId, state.spots, state.stays, userLoc]);
 
     const onZoomIn = () => mapRef.current && mapRef.current.setZoom((mapRef.current.getZoom() || 2) + 1);
     const onZoomOut = () => mapRef.current && mapRef.current.setZoom(Math.max(1, (mapRef.current.getZoom() || 2) - 1));
@@ -1333,7 +1363,7 @@
         ${boot ? BootScreen({ boot, onSkip: skipBoot }) : null}
         ${state.screen === 'trips'
           ? TripsScreen({ state, patch })
-          : TripScreen({ state, patch, mapContainerRef, overlayNodes, onZoomIn, onZoomOut, onRecenter })}
+          : TripScreen({ state, patch, mapContainerRef, overlayNodes, userLoc, onZoomIn, onZoomOut, onRecenter })}
         ${state.detail ? SpotDetailScreen({ state, patch, bump }) : null}
         ${state.addOpen ? AddSpotSheet({ state, patch, bump }) : null}
         ${state.stayOpen ? StaySheet({ state, patch }) : null}
