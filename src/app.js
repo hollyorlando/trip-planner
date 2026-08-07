@@ -28,7 +28,29 @@
     return fmtDateShort(start) + ' – ' + fmtDateShort(end);
   }
 
+  // A trip can span more than one date range (e.g. visiting the same place twice,
+  // or a trip that pauses and resumes) — show the overall span, plus a count if there's more than one.
+  function fmtLegs(legs) {
+    const valid = (legs || []).filter(l => l.start || l.end);
+    if (!valid.length) return '';
+    if (valid.length === 1) return fmtDateRange(valid[0].start, valid[0].end);
+    const sorted = valid.slice().sort((a, b) => (a.start || '9999').localeCompare(b.start || '9999'));
+    return fmtDateRange(sorted[0].start, sorted[sorted.length - 1].end) + ' · ' + valid.length + ' legs';
+  }
+
+  function newLeg() { return { id: 'leg-' + Date.now(), start: '', end: '' }; }
+  function emptyStayDraft() { return { name: '', location: null, locResults: [], locSearching: false, start: '', end: '' }; }
+
   // ---------- state ----------
+
+  // Trips used to have one start/end pair; now a trip can have several date-range
+  // "legs" (e.g. visiting the same place across two separate weeks).
+  function migrateTripLegs(trips) {
+    return trips.map(t => (Array.isArray(t.legs) && t.legs.length) ? t : {
+      id: t.id, name: t.name, fill: t.fill, geo: !!t.geo, location: t.location || null,
+      legs: [{ id: 'leg-' + t.id + '-0', start: t.start || '', end: t.end || '' }]
+    });
+  }
 
   // Stays used to be one entry per trip; now a trip can have several (e.g. two hotels
   // on one trip), each with its own date range, plus a record of which one is active.
@@ -57,13 +79,13 @@
       confirmDeleteTripId: null, editTripId: null,
       stayEditId: null, stayEditStart: '', stayEditEnd: '',
       zoom: 1.9, tx: 0, ty: 0,
-      trips: (saved && saved.trips) || D.seedTrips,
+      trips: migrateTripLegs((saved && saved.trips) || D.seedTrips),
       spots: (saved && saved.spots) || D.seedSpots,
       stays, activeStay,
-      sf: { name: '', arr: '3e', spotId: null, start: '', end: '' },
+      sf: { name: '', arr: '3e', spotId: null, start: '', end: '', googleResults: [], googleSearching: false, googlePlace: null },
       f: { name: '', cat: 'restaurant', arr: '3e', addr: '', arrManual: false, pickerOpen: false, url: '', note: '', googleResults: [], googleSearching: false, googlePlace: null },
-      nt: { name: '', start: '', end: '' },
-      et: { name: '', start: '', end: '' }
+      nt: { name: '', legs: [newLeg()], location: null, locResults: [], locSearching: false, stays: [], stayDraft: emptyStayDraft() },
+      et: { name: '', legs: [newLeg()], location: null, locResults: [], locSearching: false }
     };
   }
 
@@ -253,6 +275,94 @@
     `;
   }
 
+  // ---------- location search (trip destination + draft stays) ----------
+
+  // One field doubles as both the free-text name and the google search query — used
+  // for a trip's own location and for stays. Typing and hitting "search" (or enter)
+  // looks the text up via google places; picking a result fills the name in from it.
+  // Editing the field after a pick clears the picked place, since the name no longer
+  // matches it. Search only ever runs on an explicit tap/enter (never per keystroke)
+  // since each lookup is a billed google places call.
+  function LocationSearchField({ value, onChange, label, namePlaceholder, near, mode }) {
+    const picked = !!value.location;
+    const isRegion = mode === 'region';
+    const doSearch = async () => {
+      const q = value.name.trim();
+      if (!q) return;
+      onChange({ locSearching: true, locResults: [] });
+      const results = isRegion
+        ? await window.PinsPlaces.searchLocations(q)
+        : await window.PinsPlaces.searchPlaces(q, near ? { near } : undefined);
+      onChange({ locSearching: false, locResults: results });
+    };
+    const onKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } };
+    const pick = (r) => async () => {
+      if (!isRegion) {
+        onChange({ location: { name: r.name, address: r.address, la: r.la, ln: r.ln }, name: (r.name || value.name).toLowerCase(), locResults: [] });
+        return;
+      }
+      // Autocomplete predictions don't carry coordinates — fetch them before confirming the pick.
+      onChange({ locSearching: true, locResults: [] });
+      const details = await window.PinsPlaces.getPlaceLocation(r.id);
+      onChange({
+        locSearching: false,
+        location: { name: r.name, address: (details && details.address) || r.address, la: details && details.la, ln: details && details.ln },
+        name: (r.name || value.name).toLowerCase()
+      });
+    };
+    const change = () => onChange({ location: null, locResults: [] });
+
+    return html`
+      <div style=${MONO_HEADER}>${label}</div>
+      <div style=${{ display: 'flex', gap: 8, marginBottom: picked ? 6 : 10 }}>
+        <div style=${{ flex: 1, minWidth: 0, position: 'relative' }}>
+          ${picked ? html`<span style=${{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: '#aed900', fontSize: 15, pointerEvents: 'none' }}>✓</span>` : null}
+          <input value=${value.name} onChange=${(e) => onChange({ name: e.target.value })} onKeyDown=${onKeyDown} placeholder=${namePlaceholder} readOnly=${picked}
+            style=${{ width: '100%', border: `1px solid ${picked ? '#fff' : '#333333'}`, borderRadius: 14, padding: picked ? '11px 13px 11px 34px' : '11px 13px', fontSize: 15, background: picked ? '#1e1e1e' : 'transparent', color: '#fff' }}/>
+        </div>
+        ${window.PinsPlaces.isConfigured() ? html`
+          <button type="button" onClick=${picked ? change : doSearch} disabled=${!picked && (!value.name.trim() || value.locSearching)}
+            style=${{ flex: 'none', border: `1px solid ${picked ? '#fff' : '#333333'}`, borderRadius: 14, padding: '0 15px', fontSize: 13, color: picked || value.name.trim() ? '#fff' : '#737373' }}>${picked ? 'change' : (value.locSearching ? '…' : 'search')}</button>
+        ` : null}
+      </div>
+      ${picked ? html`<div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e', margin: '0 0 10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>found at ${value.location.address || value.location.name}</div>` : null}
+      ${value.locResults.length ? html`
+        <div style=${{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+          ${value.locResults.map(r => html`
+            <button type="button" key=${r.id} onClick=${pick(r)}
+              style=${{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', border: '1px solid #333333', borderRadius: 12, padding: '9px 11px' }}>
+              <span style=${{ fontSize: 14, fontWeight: 500 }}>${r.name}</span>
+              <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e' }}>${r.address}</span>
+            </button>
+          `)}
+        </div>
+      ` : null}
+    `;
+  }
+
+  // A trip can span more than one date range — this renders the list of legs plus
+  // a "+" to append another one, sharing the same row style as the date inputs elsewhere.
+  function LegsEditor({ legs, onChange }) {
+    const setLeg = (i, patchObj) => onChange(legs.map((l, idx) => idx === i ? { ...l, ...patchObj } : l));
+    const addLeg = () => onChange(legs.concat([newLeg()]));
+    const removeLeg = (i) => onChange(legs.filter((_, idx) => idx !== i));
+
+    return html`
+      <div style=${MONO_HEADER}>dates</div>
+      <div style=${{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+        ${legs.map((l, i) => html`
+          <div key=${l.id} style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="date" value=${l.start} onChange=${(e) => setLeg(i, { start: e.target.value })} style=${DATE_INPUT_STYLE}/>
+            <span style=${{ color: '#737373', flex: 'none' }}>–</span>
+            <input type="date" value=${l.end} min=${l.start || undefined} onChange=${(e) => setLeg(i, { end: e.target.value })} style=${DATE_INPUT_STYLE}/>
+            ${legs.length > 1 ? html`<button type="button" onClick=${() => removeLeg(i)} style=${{ flex: 'none', fontFamily: "'Character Mono',monospace", fontSize: 17, lineHeight: 1, color: '#9e9e9e', padding: '0 2px' }}>×</button>` : null}
+          </div>
+        `)}
+      </div>
+      <button type="button" onClick=${addLeg} style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#fff', borderBottom: '1px solid #494949', marginBottom: 18 }}>+ add another leg</button>
+    `;
+  }
+
   // ---------- trips list ----------
 
   function tripCard(t, state, patch) {
@@ -261,7 +371,11 @@
     const dots = dotKeys.length ? dotKeys.map(k => D.cats[k].fill) : ['#333333'];
     const open = () => patch({ screen: 'trip', tripId: t.id, sel: null, expanded: false, query: '', off: {} });
     const askDelete = (e) => { e.stopPropagation(); patch({ confirmDeleteTripId: t.id }); };
-    const askEdit = (e) => { e.stopPropagation(); patch({ editTripId: t.id, et: { name: t.name, start: t.start || '', end: t.end || '' } }); };
+    const askEdit = (e) => {
+      e.stopPropagation();
+      const legs = (t.legs && t.legs.length) ? t.legs.map(l => ({ ...l })) : [newLeg()];
+      patch({ editTripId: t.id, et: { name: t.name, legs, location: t.location || null, locResults: [], locSearching: false } });
+    };
     return html`
       <button type="button" key=${t.id} className="hoverable" onClick=${open}
         style=${{ display: 'block', width: '100%', textAlign: 'left', borderRadius: 24, padding: 12, background: t.fill }}>
@@ -269,7 +383,7 @@
           <div style=${{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 4 }}>
             <div style=${{ fontSize: 26, lineHeight: 1.05, letterSpacing: '-0.5px', fontWeight: 600, textTransform: 'lowercase' }}>${t.name}</div>
             <div style=${{ display: 'flex', alignItems: 'center', gap: 6, flex: 'none' }}>
-              <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, color: '#9e9e9e', whiteSpace: 'nowrap' }}>${fmtDateRange(t.start, t.end) || 'dates tbd'}</div>
+              <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, color: '#9e9e9e', whiteSpace: 'nowrap' }}>${fmtLegs(t.legs) || 'dates tbd'}</div>
               <span onClick=${askEdit} className="icon-btn" style=${{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: 999, flex: 'none' }}>${PencilIcon({})}</span>
               <span onClick=${askDelete} className="icon-btn" style=${{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: 999, flex: 'none' }}>${TrashIcon({})}</span>
             </div>
@@ -340,11 +454,12 @@
           `)}
           ${stays.map(s => {
             const isActive = s.id === activeStayId;
+            const dr = stays.length > 1 ? fmtDateRange(s.start, s.end) : '';
             return html`
               <div key=${s.id} onClick=${(e) => { e.stopPropagation(); patch({ stayOpen: true }); }}
                 style=${{ position: 'absolute', left: Math.round(state.tx + G.X(s.ln) * sc), top: Math.round(state.ty + G.Y(s.la) * sc), transform: 'translate(-50%,-50%)', zIndex: isActive ? 5 : 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
                 <div style=${{ width: isActive ? 34 : 28, height: isActive ? 34 : 28, borderRadius: 12, background: isActive ? '#fff' : '#131313', border: isActive ? 'none' : '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 3px 10px rgba(0,0,0,0.6)' }}>${HouseIcon({ size: isActive ? 19 : 15, color: isActive ? '#131313' : '#fff' })}</div>
-                <div style=${{ background: isActive ? '#fff' : '#131313', color: isActive ? '#131313' : '#fff', border: isActive ? 'none' : '1px solid #fff', padding: '4px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, letterSpacing: '-0.1px', whiteSpace: 'nowrap', textTransform: 'lowercase', pointerEvents: 'none' }}>${s.name}</div>
+                <div style=${{ background: isActive ? '#fff' : '#131313', color: isActive ? '#131313' : '#fff', border: isActive ? 'none' : '1px solid #fff', padding: '4px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, letterSpacing: '-0.1px', whiteSpace: 'nowrap', textTransform: 'lowercase', pointerEvents: 'none' }}>${s.name}${dr ? ' · ' + dr : ''}</div>
               </div>
             `;
           })}
@@ -370,7 +485,7 @@
         <button type="button" className="stay-chip" onClick=${() => patch({ stayOpen: true })}
           style=${{ position: 'absolute', left: 14, top: 14, zIndex: 5, background: '#131313', border: '1px solid #333333', borderRadius: 999, padding: '7px 12px', display: 'flex', alignItems: 'center', gap: 8, maxWidth: 250 }}>
           ${HouseIcon({ size: 14, color: '#fff' })}
-          <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.04em', color: '#b3b3b3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${stay ? 'staying · ' + stay.name : "set where you're staying"}</div>
+          <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.04em', color: '#b3b3b3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${stay ? 'staying · ' + stay.name + (stays.length > 1 && fmtDateRange(stay.start, stay.end) ? ' · ' + fmtDateRange(stay.start, stay.end) : '') : "set where you're staying"}</div>
         </button>
 
         <button type="button" className="fab-btn" onClick=${() => patch({ addOpen: true })}
@@ -793,16 +908,34 @@
     const all = allSpotsForTrip(state);
     const hotels = all.filter(s => s.c === 'hotel');
     const sf = state.sf;
+    const trip = state.trips.find(t => t.id === state.tripId);
+    // Biases the search toward the trip's own destination, so e.g. a hotel search
+    // on a Puglia trip surfaces hotels in Puglia instead of Puglia itself again.
+    const near = trip && trip.location ? { la: trip.location.la, ln: trip.location.ln } : undefined;
     const close = () => patch({ stayOpen: false, stayEditId: null });
 
-    const pickHotel = (s) => () => patch({ sf: { ...sf, name: s.n, arr: s.a, spotId: s.id } });
+    const pickHotel = (s) => () => patch({ sf: { ...sf, name: s.n, arr: s.a, spotId: s.id, googlePlace: null } });
     const clearHotelPick = () => patch({ sf: { ...sf, spotId: null, name: '' } });
-    const setSFName = (e) => { const v = e.target.value, hit = G.arrFrom(v); patch({ sf: { ...sf, name: v, arr: hit ? hit.arr : sf.arr, spotId: null } }); };
+    const setSFName = (e) => {
+      const v = e.target.value, hit = G.arrFrom(v);
+      patch({ sf: { ...sf, name: v, arr: hit ? hit.arr : sf.arr, spotId: null, ...(sf.googlePlace ? { googlePlace: null, googleResults: [] } : {}) } });
+    };
     const sfHit = G.arrFrom(sf.name);
     const sfNote = sfHit ? sfHit.arr + ' · ' + (D.hoods[sfHit.arr] || '') + ' — ' + sfHit.how : '';
     const pickArr = (a) => () => patch({ sf: { ...sf, arr: a } });
     const setStart = (e) => patch({ sf: { ...sf, start: e.target.value } });
     const setEnd = (e) => patch({ sf: { ...sf, end: e.target.value } });
+
+    const doStayGoogleSearch = async () => {
+      const q = sf.name.trim();
+      if (!q) return;
+      patch(prev => ({ sf: { ...prev.sf, googleSearching: true, googleResults: [] } }));
+      const results = await window.PinsPlaces.searchPlaces(q, near ? { near } : undefined);
+      patch(prev => ({ sf: { ...prev.sf, googleSearching: false, googleResults: results } }));
+    };
+    const onSFKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); doStayGoogleSearch(); } };
+    const pickStayGoogleResult = (r) => () => patch({ sf: { ...sf, googlePlace: r, name: r.name.toLowerCase(), spotId: null, googleResults: [] } });
+    const changeStayGoogle = () => patch({ sf: { ...sf, googlePlace: null, googleResults: [] } });
 
     const addStay = () => {
       let entry;
@@ -810,6 +943,9 @@
         const s = all.find(x => x.id === sf.spotId);
         if (!s) return;
         entry = { id: 'stay-' + Date.now(), name: s.n, spotId: s.id, arr: s.a, la: s.la, ln: s.ln, start: sf.start, end: sf.end };
+      } else if (sf.googlePlace) {
+        const nm = sf.name.trim(); if (!nm) return;
+        entry = { id: 'stay-' + Date.now(), name: nm.toLowerCase(), spotId: null, arr: null, address: sf.googlePlace.address, la: sf.googlePlace.la, ln: sf.googlePlace.ln, start: sf.start, end: sf.end };
       } else {
         const nm = sf.name.trim(); if (!nm) return;
         const b = D.arrs[sf.arr];
@@ -818,7 +954,7 @@
       patch({
         stays: { ...state.stays, [state.tripId]: list.concat([entry]) },
         activeStay: { ...state.activeStay, [state.tripId]: entry.id },
-        sf: { name: '', arr: sf.arr, spotId: null, start: '', end: '' }
+        sf: { name: '', arr: sf.arr, spotId: null, start: '', end: '', googleResults: [], googleSearching: false, googlePlace: null }
       });
     };
 
@@ -862,7 +998,7 @@
                       <div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <div style=${{ flex: 1, minWidth: 0 }}>
                           <div style=${{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.2px', textTransform: 'lowercase', lineHeight: 1.2 }}>${entry.name}</div>
-                          <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e', marginTop: 4 }}>${entry.arr}${fmtDateRange(entry.start, entry.end) ? ' · ' + fmtDateRange(entry.start, entry.end) : ''}</div>
+                          <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${[entry.arr || entry.address, fmtDateRange(entry.start, entry.end)].filter(Boolean).join(' · ') || 'no dates yet'}</div>
                         </div>
                         <button type="button" onClick=${setActive(entry)}
                           style=${{ flex: 'none', fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', borderRadius: 999, padding: '6px 11px', background: isActive ? '#fff' : 'transparent', color: isActive ? '#131313' : '#b3b3b3', border: `1px solid ${isActive ? '#fff' : '#333333'}`, whiteSpace: 'nowrap' }}>${isActive ? 'current' : 'switch to this'}</button>
@@ -913,16 +1049,39 @@
                 <button type="button" onClick=${clearHotelPick} style=${{ marginLeft: 'auto', fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#fff', borderBottom: '1px solid #737373' }}>change</button>
               </div>
             ` : html`
-              <div style=${MONO_HEADER}>or an address</div>
-              <input value=${sf.name} onChange=${setSFName} placeholder="12 rue de bretagne, or a friend's place"
-                style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 15, marginBottom: 10, background: 'transparent' }}/>
-              ${sfHit ? html`<div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, color: '#9e9e9e', margin: '0 0 10px' }}>${sfNote}</div>` : null}
-              <div style=${{ display: 'flex', gap: 7, overflowX: 'auto', maxWidth: '100%', paddingBottom: 12 }}>
-                ${Object.keys(D.arrs).map(a => { const on = sf.arr === a; return html`
-                  <button type="button" key=${a} onClick=${pickArr(a)}
-                    style=${{ flex: 'none', borderRadius: 999, padding: '8px 13px', background: on ? '#fff' : 'transparent', color: on ? '#131313' : '#b3b3b3', border: `1px solid ${on ? '#fff' : '#333333'}`, fontFamily: "'Character Mono',monospace", fontSize: 11 }}>${a} ${D.hoods[a] || ''}</button>
-                `; })}
+              <div style=${MONO_HEADER}>hotel or address</div>
+              <div style=${{ display: 'flex', gap: 8, marginBottom: sf.googlePlace ? 6 : 10 }}>
+                <div style=${{ flex: 1, minWidth: 0, position: 'relative' }}>
+                  ${sf.googlePlace ? html`<span style=${{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: '#aed900', fontSize: 15, pointerEvents: 'none' }}>✓</span>` : null}
+                  <input value=${sf.name} onChange=${setSFName} onKeyDown=${onSFKeyDown} placeholder="12 rue de bretagne, or a friend's place" readOnly=${!!sf.googlePlace}
+                    style=${{ width: '100%', border: `1px solid ${sf.googlePlace ? '#fff' : '#333333'}`, borderRadius: 14, padding: sf.googlePlace ? '11px 13px 11px 34px' : '11px 13px', fontSize: 15, background: sf.googlePlace ? '#1e1e1e' : 'transparent', color: '#fff' }}/>
+                </div>
+                ${window.PinsPlaces.isConfigured() ? html`
+                  <button type="button" onClick=${sf.googlePlace ? changeStayGoogle : doStayGoogleSearch} disabled=${!sf.googlePlace && (!sf.name.trim() || sf.googleSearching)}
+                    style=${{ flex: 'none', border: `1px solid ${sf.googlePlace ? '#fff' : '#333333'}`, borderRadius: 14, padding: '0 15px', fontSize: 13, color: sf.googlePlace || sf.name.trim() ? '#fff' : '#737373' }}>${sf.googlePlace ? 'change' : (sf.googleSearching ? '…' : 'search')}</button>
+                ` : null}
               </div>
+              ${sf.googlePlace ? html`<div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e', margin: '0 0 10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>found at ${sf.googlePlace.address || sf.googlePlace.name}</div>` : null}
+              ${sf.googleResults.length ? html`
+                <div style=${{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+                  ${sf.googleResults.map(r => html`
+                    <button type="button" key=${r.id} onClick=${pickStayGoogleResult(r)}
+                      style=${{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', border: '1px solid #333333', borderRadius: 12, padding: '9px 11px' }}>
+                      <span style=${{ fontSize: 14, fontWeight: 500 }}>${r.name}</span>
+                      <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e' }}>${r.address}</span>
+                    </button>
+                  `)}
+                </div>
+              ` : null}
+              ${!sf.googlePlace && sfHit ? html`<div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, color: '#9e9e9e', margin: '0 0 10px' }}>${sfNote}</div>` : null}
+              ${!sf.googlePlace ? html`
+                <div style=${{ display: 'flex', gap: 7, overflowX: 'auto', maxWidth: '100%', paddingBottom: 12 }}>
+                  ${Object.keys(D.arrs).map(a => { const on = sf.arr === a; return html`
+                    <button type="button" key=${a} onClick=${pickArr(a)}
+                      style=${{ flex: 'none', borderRadius: 999, padding: '8px 13px', background: on ? '#fff' : 'transparent', color: on ? '#131313' : '#b3b3b3', border: `1px solid ${on ? '#fff' : '#333333'}`, fontFamily: "'Character Mono',monospace", fontSize: 11 }}>${a} ${D.hoods[a] || ''}</button>
+                  `; })}
+                </div>
+              ` : null}
             `}
 
             <div style=${MONO_HEADER}>dates for this stay</div>
@@ -945,32 +1104,72 @@
   function NewTripSheet({ state, patch }) {
     const nt = state.nt;
     const close = () => patch({ newTripOpen: false });
+    const setLoc = (p) => patch(prev => ({ nt: { ...prev.nt, ...p } }));
+    const setStayDraft = (p) => patch(prev => ({ nt: { ...prev.nt, stayDraft: { ...prev.nt.stayDraft, ...p } } }));
+
+    const addDraftStay = () => {
+      const loc = nt.stayDraft.location;
+      if (!loc) return;
+      const nm = (nt.stayDraft.name.trim() || loc.name).toLowerCase();
+      const entry = { id: 'stay-' + Date.now(), name: nm, spotId: null, arr: null, address: loc.address, la: loc.la, ln: loc.ln, start: nt.stayDraft.start, end: nt.stayDraft.end };
+      patch({ nt: { ...nt, stays: nt.stays.concat([entry]), stayDraft: emptyStayDraft() } });
+    };
+    const removeDraftStay = (id) => () => patch({ nt: { ...nt, stays: nt.stays.filter(s => s.id !== id) } });
+
     const createTrip = () => {
-      const nm = (nt.name || 'new trip').toLowerCase();
+      const nm = (nt.name || 'new trip').trim().toLowerCase();
       const id = 'trip-' + Date.now() + '-' + state.trips.length;
       const fills = ['#ffadd2', '#aed900', '#7db4ff', '#f28500'];
+      const trip = { id, name: nm, legs: nt.legs, fill: fills[state.trips.length % 4], geo: false, location: nt.location };
+      const draftStays = nt.stays;
       patch({
-        trips: state.trips.concat([{ id, name: nm, start: nt.start, end: nt.end, fill: fills[state.trips.length % 4], geo: false }]),
-        newTripOpen: false, nt: { name: '', start: '', end: '' }
+        trips: state.trips.concat([trip]),
+        stays: draftStays.length ? { ...state.stays, [id]: draftStays } : state.stays,
+        activeStay: draftStays.length ? { ...state.activeStay, [id]: draftStays[0].id } : state.activeStay,
+        newTripOpen: false,
+        nt: { name: '', legs: [newLeg()], location: null, locResults: [], locSearching: false, stays: [], stayDraft: emptyStayDraft() }
       });
     };
+
     return html`
       <div style=${{ position: 'absolute', inset: 0, zIndex: 30, background: 'rgba(0,0,0,0.72)', animation: 'fadeIn 180ms linear' }} onClick=${close}>
-        <div onClick=${(e) => e.stopPropagation()} style=${{ position: 'absolute', left: 0, right: 0, bottom: 0, background: '#131313', borderRadius: '26px 26px 0 0', padding: '16px 16px 26px', animation: 'upSheet 320ms cubic-bezier(0.93,0,0.07,1)' }}>
-          <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div onClick=${(e) => e.stopPropagation()} style=${{ position: 'absolute', left: 0, right: 0, bottom: 0, background: '#131313', borderRadius: '26px 26px 0 0', maxHeight: '88%', display: 'flex', flexDirection: 'column', animation: 'upSheet 320ms cubic-bezier(0.93,0,0.07,1)' }}>
+          <div style=${{ flex: 'none', padding: '16px 16px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style=${{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.4px', textTransform: 'lowercase' }}>start a trip</div>
             <button type="button" onClick=${close} style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, color: '#b3b3b3' }}>close</button>
           </div>
-          <div style=${MONO_HEADER}>where to</div>
-          <input value=${nt.name} onChange=${(e) => patch({ nt: { ...nt, name: e.target.value } })} placeholder="lisbon, october"
-            style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 15, marginBottom: 14 }}/>
-          <div style=${MONO_HEADER}>dates</div>
-          <div style=${{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
-            <input type="date" value=${nt.start} onChange=${(e) => patch({ nt: { ...nt, start: e.target.value } })} style=${DATE_INPUT_STYLE}/>
-            <span style=${{ color: '#737373', flex: 'none' }}>–</span>
-            <input type="date" value=${nt.end} min=${nt.start || undefined} onChange=${(e) => patch({ nt: { ...nt, end: e.target.value } })} style=${DATE_INPUT_STYLE}/>
+          <div style=${{ flex: 1, overflowY: 'auto', padding: '6px 16px 22px' }}>
+            ${LocationSearchField({ value: nt, onChange: setLoc, label: 'where to', namePlaceholder: 'e.g. puglia, paris, japan', mode: 'region' })}
+            ${LegsEditor({ legs: nt.legs, onChange: (legs) => patch({ nt: { ...nt, legs } }) })}
+
+            ${window.PinsPlaces.isConfigured() ? html`
+              <div style=${MONO_HEADER}>where you're staying (optional)</div>
+              <p style=${{ fontSize: 13, lineHeight: 1.4, color: '#9e9e9e', margin: '0 0 12px' }}>add now, or skip and set it later from the map. you can add more than one.</p>
+              ${nt.stays.length ? html`
+                <div style=${{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+                  ${nt.stays.map(s => html`
+                    <div key=${s.id} style=${{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid #333333', borderRadius: 16, padding: 12 }}>
+                      <div style=${{ flex: 1, minWidth: 0 }}>
+                        <div style=${{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.2px', textTransform: 'lowercase', lineHeight: 1.2 }}>${s.name}</div>
+                        <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${[s.address, fmtDateRange(s.start, s.end)].filter(Boolean).join(' · ') || 'dates tbd'}</div>
+                      </div>
+                      <button type="button" onClick=${removeDraftStay(s.id)} style=${{ flex: 'none', fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#9e9e9e' }}>remove</button>
+                    </div>
+                  `)}
+                </div>
+              ` : null}
+              ${LocationSearchField({ value: nt.stayDraft, onChange: setStayDraft, label: 'hotel or address', namePlaceholder: "hotel name, or a friend's place", near: nt.location ? { la: nt.location.la, ln: nt.location.ln } : undefined })}
+              <div style=${{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                <input type="date" value=${nt.stayDraft.start} onChange=${(e) => setStayDraft({ start: e.target.value })} style=${DATE_INPUT_STYLE}/>
+                <span style=${{ color: '#737373', flex: 'none' }}>–</span>
+                <input type="date" value=${nt.stayDraft.end} min=${nt.stayDraft.start || undefined} onChange=${(e) => setStayDraft({ end: e.target.value })} style=${DATE_INPUT_STYLE}/>
+              </div>
+              <button type="button" onClick=${addDraftStay} disabled=${!nt.stayDraft.location}
+                style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: 12, fontSize: 14.5, textAlign: 'center', color: nt.stayDraft.location ? '#fff' : '#737373', marginBottom: 18 }}>${nt.stayDraft.location ? 'add this stay' : 'search and pick a place first'}</button>
+            ` : null}
+
+            <button type="button" onClick=${createTrip} style=${{ width: '100%', background: '#fff', color: '#131313', borderRadius: 999, padding: 15, fontSize: 16, fontWeight: 500, textTransform: 'lowercase' }}>create trip</button>
           </div>
-          <button type="button" onClick=${createTrip} style=${{ width: '100%', background: '#fff', color: '#131313', borderRadius: 999, padding: 15, fontSize: 16, fontWeight: 500, textTransform: 'lowercase' }}>create trip</button>
         </div>
       </div>
     `;
@@ -983,30 +1182,26 @@
     if (!t) return null;
     const et = state.et;
     const close = () => patch({ editTripId: null });
+    const setLoc = (p) => patch(prev => ({ et: { ...prev.et, ...p } }));
     const saveTrip = () => {
       const nm = (et.name.trim() || t.name).toLowerCase();
       patch({
-        trips: state.trips.map(tr => tr.id === t.id ? { ...tr, name: nm, start: et.start, end: et.end } : tr),
+        trips: state.trips.map(tr => tr.id === t.id ? { ...tr, name: nm, legs: et.legs, location: et.location } : tr),
         editTripId: null
       });
     };
     return html`
       <div style=${{ position: 'absolute', inset: 0, zIndex: 30, background: 'rgba(0,0,0,0.72)', animation: 'fadeIn 180ms linear' }} onClick=${close}>
-        <div onClick=${(e) => e.stopPropagation()} style=${{ position: 'absolute', left: 0, right: 0, bottom: 0, background: '#131313', borderRadius: '26px 26px 0 0', padding: '16px 16px 26px', animation: 'upSheet 320ms cubic-bezier(0.93,0,0.07,1)' }}>
-          <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div onClick=${(e) => e.stopPropagation()} style=${{ position: 'absolute', left: 0, right: 0, bottom: 0, background: '#131313', borderRadius: '26px 26px 0 0', maxHeight: '88%', display: 'flex', flexDirection: 'column', animation: 'upSheet 320ms cubic-bezier(0.93,0,0.07,1)' }}>
+          <div style=${{ flex: 'none', padding: '16px 16px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style=${{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.4px', textTransform: 'lowercase' }}>edit trip</div>
             <button type="button" onClick=${close} style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, color: '#b3b3b3' }}>close</button>
           </div>
-          <div style=${MONO_HEADER}>where to</div>
-          <input value=${et.name} onChange=${(e) => patch({ et: { ...et, name: e.target.value } })} placeholder="lisbon, october"
-            style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 15, marginBottom: 14 }}/>
-          <div style=${MONO_HEADER}>dates</div>
-          <div style=${{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
-            <input type="date" value=${et.start} onChange=${(e) => patch({ et: { ...et, start: e.target.value } })} style=${DATE_INPUT_STYLE}/>
-            <span style=${{ color: '#737373', flex: 'none' }}>–</span>
-            <input type="date" value=${et.end} min=${et.start || undefined} onChange=${(e) => patch({ et: { ...et, end: e.target.value } })} style=${DATE_INPUT_STYLE}/>
+          <div style=${{ flex: 1, overflowY: 'auto', padding: '6px 16px 22px' }}>
+            ${LocationSearchField({ value: et, onChange: setLoc, label: 'where to', namePlaceholder: 'e.g. puglia, paris, japan', mode: 'region' })}
+            ${LegsEditor({ legs: et.legs, onChange: (legs) => patch({ et: { ...et, legs } }) })}
+            <button type="button" onClick=${saveTrip} style=${{ width: '100%', background: '#fff', color: '#131313', borderRadius: 999, padding: 15, fontSize: 16, fontWeight: 500, textTransform: 'lowercase' }}>save changes</button>
           </div>
-          <button type="button" onClick=${saveTrip} style=${{ width: '100%', background: '#fff', color: '#131313', borderRadius: 999, padding: 15, fontSize: 16, fontWeight: 500, textTransform: 'lowercase' }}>save changes</button>
         </div>
       </div>
     `;
@@ -1094,7 +1289,7 @@
         const remote = await window.PinsSync.loadSharedState();
         if (remote) {
           patch({
-            trips: remote.trips || state.trips,
+            trips: remote.trips ? migrateTripLegs(remote.trips) : state.trips,
             spots: remote.spots || state.spots,
             stays: remote.stays || state.stays,
             activeStay: remote.activeStay || state.activeStay

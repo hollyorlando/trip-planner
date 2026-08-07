@@ -9,8 +9,15 @@ window.PinsPlaces = (function () {
 
   function isConfigured() { return configured; }
 
-  async function searchPlaces(query) {
+  async function searchPlaces(query, opts) {
     if (!configured || !query.trim()) return [];
+    const near = opts && opts.near;
+    const body = { textQuery: query, maxResultCount: 5 };
+    // Biases (doesn't restrict) results toward a destination that's already been picked,
+    // so e.g. a hotel search on a Puglia trip doesn't surface Puglia itself again.
+    if (near && near.la != null && near.ln != null) {
+      body.locationBias = { circle: { center: { latitude: near.la, longitude: near.ln }, radius: 50000 } };
+    }
     try {
       const res = await fetch(BASE + '/places:searchText', {
         method: 'POST',
@@ -19,7 +26,7 @@ window.PinsPlaces = (function () {
           'X-Goog-Api-Key': cfg.apiKey,
           'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location'
         },
-        body: JSON.stringify({ textQuery: query, maxResultCount: 5 })
+        body: JSON.stringify(body)
       });
       if (!res.ok) { console.warn('pins-places: search failed', await res.text()); return []; }
       const data = await res.json();
@@ -31,6 +38,45 @@ window.PinsPlaces = (function () {
         ln: p.location && p.location.longitude
       }));
     } catch (err) { console.warn('pins-places: search error', err); return []; }
+  }
+
+  // Places Autocomplete (New), restricted to the "(regions)" type collection —
+  // countries, states/provinces, and cities — so a trip destination search returns
+  // actual places, not businesses that happen to share the name (a restaurant called
+  // "Puglia", say). Predictions don't carry coordinates, so picking one requires a
+  // follow-up getPlaceLocation() call.
+  async function searchLocations(query) {
+    if (!configured || !query.trim()) return [];
+    try {
+      const res = await fetch(BASE + '/places:autocomplete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': cfg.apiKey },
+        body: JSON.stringify({ input: query, includedPrimaryTypes: ['(regions)'] })
+      });
+      if (!res.ok) { console.warn('pins-places: location search failed', await res.text()); return []; }
+      const data = await res.json();
+      return (data.suggestions || []).map(s => {
+        const p = s.placePrediction;
+        if (!p) return null;
+        return {
+          id: p.placeId,
+          name: (p.structuredFormat && p.structuredFormat.mainText && p.structuredFormat.mainText.text) || (p.text && p.text.text) || '',
+          address: (p.structuredFormat && p.structuredFormat.secondaryText && p.structuredFormat.secondaryText.text) || (p.text && p.text.text) || ''
+        };
+      }).filter(Boolean);
+    } catch (err) { console.warn('pins-places: location search error', err); return []; }
+  }
+
+  async function getPlaceLocation(placeId) {
+    if (!configured) return null;
+    try {
+      const res = await fetch(BASE + '/places/' + placeId, {
+        headers: { 'X-Goog-Api-Key': cfg.apiKey, 'X-Goog-FieldMask': 'location,formattedAddress' }
+      });
+      if (!res.ok) { console.warn('pins-places: location details failed', await res.text()); return null; }
+      const d = await res.json();
+      return { la: d.location && d.location.latitude, ln: d.location && d.location.longitude, address: d.formattedAddress };
+    } catch (err) { console.warn('pins-places: location details error', err); return null; }
   }
 
   function formatHours(oh) {
@@ -82,5 +128,5 @@ window.PinsPlaces = (function () {
     } catch (err) { console.warn('pins-places: photo error', err); return null; }
   }
 
-  return { isConfigured, searchPlaces, getDetails, fetchPhotoBlob };
+  return { isConfigured, searchPlaces, searchLocations, getPlaceLocation, getDetails, fetchPhotoBlob };
 })();
