@@ -7,7 +7,6 @@ window.PinsData = (function () {
     drinks:     { label: 'drinks + wine',    fill: '#d90000', ink: '#ffffff', soft: '#2f1616' },
     todo:       { label: 'things to do',     fill: '#aed900', ink: '#131313', soft: '#242b12' },
     shop:       { label: 'shops',            fill: '#f28500', ink: '#131313', soft: '#2f2214' },
-    hotel:      { label: 'stays',            fill: '#abf5ed', ink: '#131313', soft: '#16292a' },
     experience: { label: 'experiences',      fill: '#7db4ff', ink: '#131313', soft: '#1b2434' }
   };
 
@@ -74,12 +73,7 @@ window.PinsData = (function () {
     { n: 'sabre', c: 'shop', a: '3e', la: 48.8640, ln: 2.3670, no: 'cutlery!! the whole reason to leave room in the suitcase.', t: ['cutlery', 'gifts'] },
     { n: 'fotoautomat booth', c: 'experience', a: '4e', la: 48.8670, ln: 2.3630, no: 'analog photo booth. black and white, four frames, no retakes.', t: ['photos'] },
     { n: 'wine by the seine', c: 'experience', a: '4e', la: 48.8530, ln: 2.3550, no: 'sit on the quai with a bottle. bring a corkscrew, cups optional.', t: ['picnic', 'sunset'] },
-    { n: 'eiffel tower sparkle', c: 'experience', a: '16e', la: 48.8620, ln: 2.2895, no: 'watch it sparkle on the hour after dark. trocadéro side.', t: ['night', 'free'] },
-    { n: 'hotel du cygne', c: 'hotel', a: '1er', la: 48.8640, ln: 2.3480, no: 'double bed. very close to le marais.', u: 'https://expe.onelink.me/hnLd/dkumtl8a', t: ['double bed'], p: '$527 · aug 23–25' },
-    { n: 'hôtel saint louis pigalle', c: 'hotel', a: '9e', la: 48.8815, ln: 2.3375, no: 'double bed, in pigalle.', u: 'https://expe.onelink.me/hnLd/hcaaoflg', t: ['double bed', 'pigalle'], p: '$729 · aug 23–25' },
-    { n: 'ws marais', c: 'hotel', a: '3e', la: 48.8625, ln: 2.3620, no: 'double bed, right in le marais.', u: 'https://expe.onelink.me/hnLd/shgpyokh', t: ['double bed'], p: '$744 · aug 23–25' },
-    { n: 'les patios du marais', c: 'hotel', a: '3e', la: 48.8610, ln: 2.3640, no: 'double bed. best price of the marais options.', u: 'https://expe.onelink.me/hnLd/nuk', t: ['double bed', 'best value'], p: '$618 · aug 23–25' },
-    { n: 'hôtel du vieux saule', c: 'hotel', a: '3e', la: 48.8655, ln: 2.3630, no: 'double bed, quiet street in the 3rd.', u: 'https://expe.onelink.me/hnLd/nyeq3zwf', t: ['double bed'], p: '$649 · aug 23–25' }
+    { n: 'eiffel tower sparkle', c: 'experience', a: '16e', la: 48.8620, ln: 2.2895, no: 'watch it sparkle on the hour after dark. trocadéro side.', t: ['night', 'free'] }
   ];
 
   const seedTrips = [

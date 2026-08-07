@@ -54,7 +54,7 @@
 
   // Stays used to be one entry per trip; now a trip can have several (e.g. two hotels
   // on one trip), each with its own date range, plus a record of which one is active.
-  function migrateStays(saved, stayHotel) {
+  function migrateStays(saved, defaultEntry) {
     if (saved && saved.activeStay) return { stays: saved.stays || {}, activeStay: saved.activeStay };
     if (saved && saved.stays) {
       const stays = {}, activeStay = {};
@@ -65,14 +65,13 @@
       });
       return { stays, activeStay };
     }
-    const entry = { id: 'stay-seed', name: stayHotel.n, spotId: stayHotel.id, arr: stayHotel.a, la: stayHotel.la, ln: stayHotel.ln, start: '', end: '' };
-    return { stays: { paris: [entry] }, activeStay: { paris: entry.id } };
+    return { stays: { paris: [defaultEntry] }, activeStay: { paris: defaultEntry.id } };
   }
 
   function makeInitialState() {
     const saved = S.load();
-    const stayHotel = D.seedSpots.find(s => s.n === 'les patios du marais');
-    const { stays, activeStay } = migrateStays(saved, stayHotel);
+    const defaultStay = { id: 'stay-seed', name: 'les patios du marais', spotId: null, arr: '3e', la: 48.8610, ln: 2.3640, start: '', end: '' };
+    const { stays, activeStay } = migrateStays(saved, defaultStay);
     return {
       screen: 'trips', tripId: 'paris', view: 'map', query: '', off: {},
       sel: null, detail: null, expanded: false, addOpen: false, newTripOpen: false, stayOpen: false,
@@ -80,9 +79,11 @@
       stayEditId: null, stayEditStart: '', stayEditEnd: '',
       zoom: 1.9, tx: 0, ty: 0,
       trips: migrateTripLegs((saved && saved.trips) || D.seedTrips),
-      spots: (saved && saved.spots) || D.seedSpots,
+      // Hotel spots (the old "pinned/saved hotels" pick-list) were retired in favor of
+      // Google-Places-backed stays entered directly — drop any that survive in old saved data.
+      spots: ((saved && saved.spots) || D.seedSpots).filter(s => s.c !== 'hotel'),
       stays, activeStay,
-      sf: { name: '', arr: '3e', spotId: null, start: '', end: '', googleResults: [], googleSearching: false, googlePlace: null },
+      sf: { name: '', arr: '3e', start: '', end: '', googleResults: [], googleSearching: false, googlePlace: null },
       f: { name: '', cat: 'restaurant', arr: '3e', addr: '', arrManual: false, pickerOpen: false, url: '', note: '', googleResults: [], googleSearching: false, googlePlace: null },
       nt: { name: '', legs: [newLeg()], location: null, locResults: [], locSearching: false, stays: [], stayDraft: emptyStayDraft() },
       et: { name: '', legs: [newLeg()], location: null, locResults: [], locSearching: false }
@@ -286,6 +287,9 @@
   function LocationSearchField({ value, onChange, label, namePlaceholder, near, mode }) {
     const picked = !!value.location;
     const isRegion = mode === 'region';
+    // Region picks (a trip's destination) aren't worth renaming, but a place pick (a stay)
+    // should stay editable — Google's name is a starting point, not the final word.
+    const locked = picked && isRegion;
     const doSearch = async () => {
       const q = value.name.trim();
       if (!q) return;
@@ -317,12 +321,12 @@
       <div style=${{ display: 'flex', gap: 8, marginBottom: picked ? 6 : 10 }}>
         <div style=${{ flex: 1, minWidth: 0, position: 'relative' }}>
           ${picked ? html`<span style=${{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: '#aed900', fontSize: 15, pointerEvents: 'none' }}>✓</span>` : null}
-          <input value=${value.name} onChange=${(e) => onChange({ name: e.target.value })} onKeyDown=${onKeyDown} placeholder=${namePlaceholder} readOnly=${picked}
-            style=${{ width: '100%', border: `1px solid ${picked ? '#fff' : '#333333'}`, borderRadius: 14, padding: picked ? '11px 13px 11px 34px' : '11px 13px', fontSize: 15, background: picked ? '#1e1e1e' : 'transparent', color: '#fff' }}/>
+          <input value=${value.name} onChange=${(e) => onChange({ name: e.target.value })} onKeyDown=${onKeyDown} placeholder=${namePlaceholder} readOnly=${locked}
+            style=${{ width: '100%', border: `1px solid ${picked ? '#fff' : '#333333'}`, borderRadius: 14, padding: picked ? '11px 13px 11px 34px' : '11px 13px', fontSize: 15, background: locked ? '#1e1e1e' : 'transparent', color: '#fff' }}/>
         </div>
         ${window.PinsPlaces.isConfigured() ? html`
           <button type="button" onClick=${picked ? change : doSearch} disabled=${!picked && (!value.name.trim() || value.locSearching)}
-            style=${{ flex: 'none', border: `1px solid ${picked ? '#fff' : '#333333'}`, borderRadius: 14, padding: '0 15px', fontSize: 13, color: picked || value.name.trim() ? '#fff' : '#737373' }}>${picked ? 'change' : (value.locSearching ? '…' : 'search')}</button>
+            style=${{ flex: 'none', border: `1px solid ${picked ? '#fff' : '#333333'}`, borderRadius: 14, padding: '0 15px', fontSize: 13, color: picked || value.name.trim() ? '#fff' : '#737373' }}>${picked ? 'search again' : (value.locSearching ? '…' : 'search')}</button>
         ` : null}
       </div>
       ${picked ? html`<div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e', margin: '0 0 10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>found at ${value.location.address || value.location.name}</div>` : null}
@@ -664,22 +668,11 @@
     const c = D.cats[d.c];
     const stay = currentStay(state);
     const km = distanceTo(state, d);
-    const isStay = !!stay && stay.spotId === d.id;
-    const canBeStay = d.c === 'hotel' && !isStay;
 
     const close = () => patch({ detail: null });
     const toggleVisited = () => patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, visited: !s.visited } : s) });
     const setNote = (e) => { const v = e.target.value; patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, no: v } : s) }); };
     const removeSpot = () => patch({ spots: state.spots.filter(s => s.id !== d.id), detail: null, sel: null });
-    const setAsStay = () => {
-      const existing = stayList(state).find(s => s.spotId === d.id);
-      if (existing) { patch({ activeStay: { ...state.activeStay, [state.tripId]: existing.id } }); return; }
-      const entry = { id: 'stay-' + Date.now() + '-' + d.id, name: d.n, spotId: d.id, arr: d.a, la: d.la, ln: d.ln, start: '', end: '' };
-      patch({
-        stays: { ...state.stays, [state.tripId]: stayList(state).concat([entry]) },
-        activeStay: { ...state.activeStay, [state.tripId]: entry.id }
-      });
-    };
 
     return html`
       <div style=${{ position: 'absolute', inset: 0, zIndex: 20, background: '#131313', display: 'flex', flexDirection: 'column', animation: 'upSheet 320ms cubic-bezier(0.93,0,0.07,1)' }}>
@@ -709,8 +702,8 @@
             <div style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
               <div style=${{ background: '#1e1e1e', borderRadius: 16, padding: '12px 13px' }}>
                 <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 9.5, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#9e9e9e', marginBottom: 5 }}>from your stay</div>
-                <div style=${{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.3px' }}>${!stay ? 'no stay set' : (isStay ? 'your stay' : G.fmtKm(km))}</div>
-                <div style=${{ fontSize: 12.5, color: '#b3b3b3' }}>${!stay ? 'tap to set one' : (isStay ? 'you sleep here' : Math.max(2, Math.round(km * 13)) + ' min walk')}</div>
+                <div style=${{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.3px' }}>${!stay ? 'no stay set' : G.fmtKm(km)}</div>
+                <div style=${{ fontSize: 12.5, color: '#b3b3b3' }}>${!stay ? 'tap to set one' : Math.max(2, Math.round(km * 13)) + ' min walk'}</div>
               </div>
               <div style=${{ background: '#1e1e1e', borderRadius: 16, padding: '12px 13px' }}>
                 <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 9.5, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#9e9e9e', marginBottom: 5 }}>hours · price</div>
@@ -718,18 +711,6 @@
                 <div style=${{ fontSize: 12.5, color: '#b3b3b3' }}>${d.p || 'add a price'}</div>
               </div>
             </div>
-            ${canBeStay ? html`
-              <button type="button" onClick=${setAsStay} className="stay-chip"
-                style=${{ width: '100%', border: '1px solid #333333', borderRadius: 16, padding: 13, fontSize: 15, fontWeight: 500, textTransform: 'lowercase', color: '#fff', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                ${HouseIcon({ size: 16, color: '#fff' })} make this where you're staying
-              </button>
-            ` : null}
-            ${isStay ? html`
-              <div style=${{ display: 'flex', alignItems: 'center', gap: 9, background: '#fff', color: '#131313', borderRadius: 16, padding: 13, marginBottom: 14 }}>
-                ${HouseIcon({ size: 16, color: '#131313' })}
-                <span style=${{ fontSize: 14.5, fontWeight: 500 }}>you're staying here${fmtDateRange(stay.start, stay.end) ? ' · ' + fmtDateRange(stay.start, stay.end) : ''} — distances start from this pin</span>
-              </div>
-            ` : null}
             ${d.u ? html`
               <div style=${{ borderRadius: 20, padding: 14, background: c.soft, marginBottom: 14 }}>
                 <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9 }}>
@@ -905,8 +886,6 @@
   function StaySheet({ state, patch }) {
     const list = stayList(state);
     const activeId = state.activeStay[state.tripId];
-    const all = allSpotsForTrip(state);
-    const hotels = all.filter(s => s.c === 'hotel');
     const sf = state.sf;
     const trip = state.trips.find(t => t.id === state.tripId);
     // Biases the search toward the trip's own destination, so e.g. a hotel search
@@ -914,11 +893,13 @@
     const near = trip && trip.location ? { la: trip.location.la, ln: trip.location.ln } : undefined;
     const close = () => patch({ stayOpen: false, stayEditId: null });
 
-    const pickHotel = (s) => () => patch({ sf: { ...sf, name: s.n, arr: s.a, spotId: s.id, googlePlace: null } });
-    const clearHotelPick = () => patch({ sf: { ...sf, spotId: null, name: '' } });
     const setSFName = (e) => {
-      const v = e.target.value, hit = G.arrFrom(v);
-      patch({ sf: { ...sf, name: v, arr: hit ? hit.arr : sf.arr, spotId: null, ...(sf.googlePlace ? { googlePlace: null, googleResults: [] } : {}) } });
+      const v = e.target.value;
+      // Once a place is picked, this field is just the editable display name —
+      // don't let typing re-trigger the arrondissement guess or drop the pick.
+      if (sf.googlePlace) { patch({ sf: { ...sf, name: v } }); return; }
+      const hit = G.arrFrom(v);
+      patch({ sf: { ...sf, name: v, arr: hit ? hit.arr : sf.arr } });
     };
     const sfHit = G.arrFrom(sf.name);
     const sfNote = sfHit ? sfHit.arr + ' · ' + (D.hoods[sfHit.arr] || '') + ' — ' + sfHit.how : '';
@@ -934,16 +915,12 @@
       patch(prev => ({ sf: { ...prev.sf, googleSearching: false, googleResults: results } }));
     };
     const onSFKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); doStayGoogleSearch(); } };
-    const pickStayGoogleResult = (r) => () => patch({ sf: { ...sf, googlePlace: r, name: r.name.toLowerCase(), spotId: null, googleResults: [] } });
-    const changeStayGoogle = () => patch({ sf: { ...sf, googlePlace: null, googleResults: [] } });
+    const pickStayGoogleResult = (r) => () => patch({ sf: { ...sf, googlePlace: r, name: (r.name || r.address).toLowerCase(), googleResults: [] } });
+    const changeStayGoogle = () => patch({ sf: { ...sf, googlePlace: null, name: '', googleResults: [] } });
 
     const addStay = () => {
       let entry;
-      if (sf.spotId) {
-        const s = all.find(x => x.id === sf.spotId);
-        if (!s) return;
-        entry = { id: 'stay-' + Date.now(), name: s.n, spotId: s.id, arr: s.a, la: s.la, ln: s.ln, start: sf.start, end: sf.end };
-      } else if (sf.googlePlace) {
+      if (sf.googlePlace) {
         const nm = sf.name.trim(); if (!nm) return;
         entry = { id: 'stay-' + Date.now(), name: nm.toLowerCase(), spotId: null, arr: null, address: sf.googlePlace.address, la: sf.googlePlace.la, ln: sf.googlePlace.ln, start: sf.start, end: sf.end };
       } else {
@@ -954,7 +931,7 @@
       patch({
         stays: { ...state.stays, [state.tripId]: list.concat([entry]) },
         activeStay: { ...state.activeStay, [state.tripId]: entry.id },
-        sf: { name: '', arr: sf.arr, spotId: null, start: '', end: '', googleResults: [], googleSearching: false, googlePlace: null }
+        sf: { name: '', arr: sf.arr, start: '', end: '', googleResults: [], googleSearching: false, googlePlace: null }
       });
     };
 
@@ -1025,64 +1002,39 @@
               </div>
             ` : null}
 
-            <div style=${MONO_HEADER}>${list.length ? 'add another stay' : 'hotels you saved'}</div>
-            <div style=${{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
-              ${hotels.length ? hotels.map(s => {
-                const picked = sf.spotId === s.id;
-                const already = list.some(e => e.spotId === s.id);
-                return html`
-                  <button type="button" key=${s.id} className="stay-chip" onClick=${pickHotel(s)}
-                    style=${{ display: 'flex', width: '100%', textAlign: 'left', alignItems: 'center', gap: 12, border: `1px solid ${picked ? '#fff' : '#333333'}`, borderRadius: 18, padding: 13 }}>
-                    <div style=${{ flex: 1, minWidth: 0 }}>
-                      <div style=${{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.2px', textTransform: 'lowercase', lineHeight: 1.2 }}>${s.n}</div>
-                      <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e', marginTop: 4 }}>${s.a} · ${s.p || 'no price saved'}${already ? ' · already added' : ''}</div>
-                    </div>
-                    <span style=${{ flex: 'none', fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', borderRadius: 999, padding: '6px 11px', background: picked ? '#fff' : 'transparent', color: picked ? '#131313' : '#b3b3b3', border: `1px solid ${picked ? '#fff' : '#333333'}`, whiteSpace: 'nowrap' }}>${picked ? 'selected' : 'pick'}</span>
-                  </button>
-                `;
-              }) : html`<div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11.5, color: '#737373', lineHeight: 1.5 }}>no hotels saved for this trip yet — add one as a spot first, or just use an address below.</div>`}
+            <div style=${MONO_HEADER}>${list.length ? 'add another stay' : "where you're staying"}</div>
+            <div style=${{ display: 'flex', gap: 8, marginBottom: sf.googlePlace ? 6 : 10 }}>
+              <div style=${{ flex: 1, minWidth: 0, position: 'relative' }}>
+                ${sf.googlePlace ? html`<span style=${{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: '#aed900', fontSize: 15, pointerEvents: 'none' }}>✓</span>` : null}
+                <input value=${sf.name} onChange=${setSFName} onKeyDown=${onSFKeyDown} placeholder="search by name or address — sheraton montreal, 12 rue de bretagne…"
+                  style=${{ width: '100%', border: `1px solid ${sf.googlePlace ? '#fff' : '#333333'}`, borderRadius: 14, padding: sf.googlePlace ? '11px 13px 11px 34px' : '11px 13px', fontSize: 15, background: 'transparent', color: '#fff' }}/>
+              </div>
+              ${window.PinsPlaces.isConfigured() ? html`
+                <button type="button" onClick=${sf.googlePlace ? changeStayGoogle : doStayGoogleSearch} disabled=${!sf.googlePlace && (!sf.name.trim() || sf.googleSearching)}
+                  style=${{ flex: 'none', border: `1px solid ${sf.googlePlace ? '#fff' : '#333333'}`, borderRadius: 14, padding: '0 15px', fontSize: 13, color: sf.googlePlace || sf.name.trim() ? '#fff' : '#737373' }}>${sf.googlePlace ? 'search again' : (sf.googleSearching ? '…' : 'search')}</button>
+              ` : null}
             </div>
-
-            ${sf.spotId ? html`
-              <div style=${{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14 }}>
-                <span style=${{ fontSize: 13.5, color: '#b3b3b3' }}>using ${sf.name}</span>
-                <button type="button" onClick=${clearHotelPick} style=${{ marginLeft: 'auto', fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#fff', borderBottom: '1px solid #737373' }}>change</button>
+            ${sf.googlePlace ? html`<div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e', margin: '0 0 10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>found at ${sf.googlePlace.address || sf.googlePlace.name} — edit the name above if you'd like</div>` : null}
+            ${sf.googleResults.length ? html`
+              <div style=${{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+                ${sf.googleResults.map(r => html`
+                  <button type="button" key=${r.id} onClick=${pickStayGoogleResult(r)}
+                    style=${{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', border: '1px solid #333333', borderRadius: 12, padding: '9px 11px' }}>
+                    <span style=${{ fontSize: 14, fontWeight: 500 }}>${r.name}</span>
+                    <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e' }}>${r.address}</span>
+                  </button>
+                `)}
               </div>
-            ` : html`
-              <div style=${MONO_HEADER}>hotel or address</div>
-              <div style=${{ display: 'flex', gap: 8, marginBottom: sf.googlePlace ? 6 : 10 }}>
-                <div style=${{ flex: 1, minWidth: 0, position: 'relative' }}>
-                  ${sf.googlePlace ? html`<span style=${{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: '#aed900', fontSize: 15, pointerEvents: 'none' }}>✓</span>` : null}
-                  <input value=${sf.name} onChange=${setSFName} onKeyDown=${onSFKeyDown} placeholder="12 rue de bretagne, or a friend's place" readOnly=${!!sf.googlePlace}
-                    style=${{ width: '100%', border: `1px solid ${sf.googlePlace ? '#fff' : '#333333'}`, borderRadius: 14, padding: sf.googlePlace ? '11px 13px 11px 34px' : '11px 13px', fontSize: 15, background: sf.googlePlace ? '#1e1e1e' : 'transparent', color: '#fff' }}/>
-                </div>
-                ${window.PinsPlaces.isConfigured() ? html`
-                  <button type="button" onClick=${sf.googlePlace ? changeStayGoogle : doStayGoogleSearch} disabled=${!sf.googlePlace && (!sf.name.trim() || sf.googleSearching)}
-                    style=${{ flex: 'none', border: `1px solid ${sf.googlePlace ? '#fff' : '#333333'}`, borderRadius: 14, padding: '0 15px', fontSize: 13, color: sf.googlePlace || sf.name.trim() ? '#fff' : '#737373' }}>${sf.googlePlace ? 'change' : (sf.googleSearching ? '…' : 'search')}</button>
-                ` : null}
+            ` : null}
+            ${!window.PinsPlaces.isConfigured() ? html`
+              ${sfHit ? html`<div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, color: '#9e9e9e', margin: '0 0 10px' }}>${sfNote}</div>` : null}
+              <div style=${{ display: 'flex', gap: 7, overflowX: 'auto', maxWidth: '100%', paddingBottom: 12 }}>
+                ${Object.keys(D.arrs).map(a => { const on = sf.arr === a; return html`
+                  <button type="button" key=${a} onClick=${pickArr(a)}
+                    style=${{ flex: 'none', borderRadius: 999, padding: '8px 13px', background: on ? '#fff' : 'transparent', color: on ? '#131313' : '#b3b3b3', border: `1px solid ${on ? '#fff' : '#333333'}`, fontFamily: "'Character Mono',monospace", fontSize: 11 }}>${a} ${D.hoods[a] || ''}</button>
+                `; })}
               </div>
-              ${sf.googlePlace ? html`<div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e', margin: '0 0 10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>found at ${sf.googlePlace.address || sf.googlePlace.name}</div>` : null}
-              ${sf.googleResults.length ? html`
-                <div style=${{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
-                  ${sf.googleResults.map(r => html`
-                    <button type="button" key=${r.id} onClick=${pickStayGoogleResult(r)}
-                      style=${{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left', border: '1px solid #333333', borderRadius: 12, padding: '9px 11px' }}>
-                      <span style=${{ fontSize: 14, fontWeight: 500 }}>${r.name}</span>
-                      <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e' }}>${r.address}</span>
-                    </button>
-                  `)}
-                </div>
-              ` : null}
-              ${!sf.googlePlace && sfHit ? html`<div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, color: '#9e9e9e', margin: '0 0 10px' }}>${sfNote}</div>` : null}
-              ${!sf.googlePlace ? html`
-                <div style=${{ display: 'flex', gap: 7, overflowX: 'auto', maxWidth: '100%', paddingBottom: 12 }}>
-                  ${Object.keys(D.arrs).map(a => { const on = sf.arr === a; return html`
-                    <button type="button" key=${a} onClick=${pickArr(a)}
-                      style=${{ flex: 'none', borderRadius: 999, padding: '8px 13px', background: on ? '#fff' : 'transparent', color: on ? '#131313' : '#b3b3b3', border: `1px solid ${on ? '#fff' : '#333333'}`, fontFamily: "'Character Mono',monospace", fontSize: 11 }}>${a} ${D.hoods[a] || ''}</button>
-                  `; })}
-                </div>
-              ` : null}
-            `}
+            ` : null}
 
             <div style=${MONO_HEADER}>dates for this stay</div>
             <div style=${{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
@@ -1092,7 +1044,7 @@
             </div>
 
             <button type="button" onClick=${addStay}
-              style=${{ width: '100%', background: (sf.spotId || sf.name.trim()) ? '#fff' : '#1e1e1e', color: (sf.spotId || sf.name.trim()) ? '#131313' : '#737373', borderRadius: 999, padding: 14, fontSize: 15.5, fontWeight: 500, textTransform: 'lowercase' }}>add this stay</button>
+              style=${{ width: '100%', background: sf.name.trim() ? '#fff' : '#1e1e1e', color: sf.name.trim() ? '#131313' : '#737373', borderRadius: 999, padding: 14, fontSize: 15.5, fontWeight: 500, textTransform: 'lowercase' }}>add this stay</button>
           </div>
         </div>
       </div>
@@ -1158,7 +1110,7 @@
                   `)}
                 </div>
               ` : null}
-              ${LocationSearchField({ value: nt.stayDraft, onChange: setStayDraft, label: 'hotel or address', namePlaceholder: "hotel name, or a friend's place", near: nt.location ? { la: nt.location.la, ln: nt.location.ln } : undefined })}
+              ${LocationSearchField({ value: nt.stayDraft, onChange: setStayDraft, label: 'search by name or address', namePlaceholder: "sheraton montreal, 12 rue de bretagne…", near: nt.location ? { la: nt.location.la, ln: nt.location.ln } : undefined })}
               <div style=${{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                 <input type="date" value=${nt.stayDraft.start} onChange=${(e) => setStayDraft({ start: e.target.value })} style=${DATE_INPUT_STYLE}/>
                 <span style=${{ color: '#737373', flex: 'none' }}>–</span>
@@ -1290,7 +1242,9 @@
         if (remote) {
           patch({
             trips: remote.trips ? migrateTripLegs(remote.trips) : state.trips,
-            spots: remote.spots || state.spots,
+            // Retired hotel-category spots (the old pinned/saved-hotels list) can still be
+            // sitting in older synced data — strip them here too, not just from local storage.
+            spots: remote.spots ? remote.spots.filter(s => s.c !== 'hotel') : state.spots,
             stays: remote.stays || state.stays,
             activeStay: remote.activeStay || state.activeStay
           });
