@@ -25,6 +25,10 @@ input:focus,textarea:focus{outline:2px solid #fff;outline-offset:0}
 
 @keyframes upSheet{from{transform:translateY(100%)}to{transform:translateY(0)}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes pinDrop{0%{transform:translate(-50%,-50%) translateY(-230px) scale(.55);opacity:0}60%{opacity:1}100%{transform:translate(-50%,-50%) translateY(0) scale(1);opacity:1}}
+@keyframes routeDraw{to{stroke-dashoffset:0}}
+@keyframes glitchIn{0%{opacity:0;transform:translateX(-7px) skewX(-14deg)}40%{opacity:1;transform:translateX(4px) skewX(6deg)}70%{transform:translateX(-2px) skewX(-2deg)}100%{opacity:1;transform:translateX(0) skewX(0)}}
+@keyframes dimPulse{0%,100%{opacity:.4}50%{opacity:.85}}
 
 .app-shell{
   max-width:520px;margin:0 auto;height:100vh;height:100dvh;

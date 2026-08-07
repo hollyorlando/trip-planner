@@ -224,6 +224,35 @@
     `;
   }
 
+  // ---------- boot ----------
+
+  const BOOT_PINS = [
+    { x: 18, y: 74, c: '#7db4ff' }, { x: 62, y: 30, c: '#df91f2' }, { x: 100, y: 92, c: '#aed900' }, { x: 140, y: 44, c: '#ff4dc9' },
+    { x: 176, y: 100, c: '#fff59e' }, { x: 206, y: 20, c: '#f28500' }, { x: 236, y: 68, c: '#d90000' }, { x: 274, y: 104, c: '#abf5ed' }
+  ];
+  const BOOT_LETTERS = '(pins)'.split('');
+
+  function BootScreen({ boot, onSkip }) {
+    return html`
+      <div onClick=${onSkip} style=${{ position: 'absolute', inset: 0, zIndex: 60, background: '#131313', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 34, cursor: 'pointer', opacity: boot === 'out' ? 0 : 1, transitionProperty: 'opacity', transitionDuration: '340ms', transitionTimingFunction: 'cubic-bezier(0.93,0,1,1)' }}>
+        <div style=${{ position: 'relative', width: 300, height: 130 }}>
+          <svg width="300" height="130" viewBox="0 0 300 130" fill="none" style=${{ position: 'absolute', inset: 0 }}>
+            <path d="M18 74 L62 30 L100 92 L140 44 L176 100 L206 20 L236 68 L274 104" stroke="#2e2e2e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="760" strokeDashoffset="760" style=${{ animation: 'routeDraw 900ms cubic-bezier(0.93,0,0.07,1) 640ms both' }}/>
+          </svg>
+          ${BOOT_PINS.map((p, i) => html`
+            <div key=${i} style=${{ position: 'absolute', left: p.x, top: p.y, width: 26, height: 26, borderRadius: 999, background: p.c, border: '2.5px solid #131313', boxShadow: '0 3px 10px rgba(0,0,0,0.5)', animation: `pinDrop 620ms cubic-bezier(0,0,0.07,1.25) ${i * 90}ms both` }}/>
+          `)}
+        </div>
+        <div style=${{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <div style=${{ fontSize: 46, lineHeight: 1, letterSpacing: '-1px', fontWeight: 600, color: '#fff' }}>
+            ${BOOT_LETTERS.map((ch, i) => html`<span key=${i} style=${{ display: 'inline-block', animation: `glitchIn 260ms cubic-bezier(0.93,0,0.07,1) ${1020 + i * 75}ms both` }}>${ch}</span>`)}
+          </div>
+          <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#9e9e9e', animation: 'dimPulse 1400ms cubic-bezier(0.93,0,0.07,1) 1500ms infinite' }}>unpacking your trips</div>
+        </div>
+      </div>
+    `;
+  }
+
   // ---------- trips list ----------
 
   function tripCard(t, state, patch) {
@@ -1030,10 +1059,30 @@
       S.save({ trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay });
     }, [state.trips, state.spots, state.stays, state.activeStay]);
 
+    // ---- boot ----
+    const [boot, setBoot] = useState('in');
+    const [bootMinElapsed, setBootMinElapsed] = useState(false);
+    useEffect(() => {
+      const t = setTimeout(() => setBootMinElapsed(true), 2350);
+      return () => clearTimeout(t);
+    }, []);
+    const skipBoot = () => {
+      if (boot !== 'in') return;
+      setBoot('out');
+      setTimeout(() => setBoot(null), 380);
+    };
+
     // ---- cross-device sync (Supabase, shared — no login) ----
     const syncOn = window.PinsSync.isConfigured();
     const [syncReady, setSyncReady] = useState(!syncOn);
     const mergedRef = useRef(false);
+
+    useEffect(() => {
+      if (boot !== 'in' || !bootMinElapsed || !syncReady) return;
+      setBoot('out');
+      const t = setTimeout(() => setBoot(null), 370);
+      return () => clearTimeout(t);
+    }, [boot, bootMinElapsed, syncReady]);
 
     useEffect(() => {
       if (!syncOn || mergedRef.current) return;
@@ -1122,14 +1171,9 @@
     const onMapWheel = (e) => { e.preventDefault(); patch(prev => zoomBy(prev, mapSize, e.deltaY < 0 ? 1.12 : 0.9)); };
     const onMapClick = () => { if (!draggedRef.current) patch({ sel: null }); };
 
-    if (syncOn && !syncReady) {
-      return html`<div className="app-shell" style=${{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 15, letterSpacing: '0.02em', color: '#9e9e9e' }}>(pins)</div>
-      </div>`;
-    }
-
     return html`
       <div className="app-shell">
+        ${boot ? BootScreen({ boot, onSkip: skipBoot }) : null}
         ${state.screen === 'trips'
           ? TripsScreen({ state, patch })
           : TripScreen({ state, patch, mapWrapRef, mapSize, onMapPointerDown, onMapWheel, onMapClick })}
