@@ -113,7 +113,7 @@ window.PinsPlaces = (function () {
         ln: d.location && d.location.longitude,
         hours: formatHours(d.regularOpeningHours),
         price: formatPrice(d.priceLevel, d.rating),
-        photoName: d.photos && d.photos[0] && d.photos[0].name
+        photoNames: (d.photos || []).slice(0, 3).map(p => p.name)
       };
     } catch (err) { console.warn('pins-places: details error', err); return null; }
   }
