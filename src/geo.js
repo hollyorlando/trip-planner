@@ -24,25 +24,16 @@ window.PinsGeo = (function () {
     catch (e) { return 'link'; }
   }
 
-  function arrName(n) { return n === 1 ? '1er' : n + 'e'; }
-
-  // Best-effort: guess a Paris arrondissement from free-text address/neighborhood.
-  function arrFrom(addr) {
-    const a = (addr || '').toLowerCase();
-    if (!a.trim()) return null;
-    const pc = a.match(/\b750(0[1-9]|1[0-9]|20)\b/);
-    if (pc) {
-      const n = parseInt(pc[0].slice(3), 10);
-      if (n >= 1 && n <= 20) return { arr: arrName(n), how: 'read from postal code ' + pc[0] };
+  // Infer a Paris arrondissement from a pin's actual coordinates, by nearest centroid.
+  function arrFromLatLng(la, ln) {
+    if (la == null || ln == null) return null;
+    let best = null, bestDist = Infinity;
+    for (const k of Object.keys(D.arrs)) {
+      const d = hav([la, ln], D.arrs[k]);
+      if (d < bestDist) { bestDist = d; best = k; }
     }
-    for (const [k, arr] of D.clues) if (a.indexOf(k) > -1) return { arr, how: 'matched “' + k + '”' };
-    const ord = a.match(/\b(\d{1,2})\s*(er|eme|ème|e|st|nd|rd|th)\b/);
-    if (ord) {
-      const n = +ord[1];
-      if (n >= 1 && n <= 20) return { arr: arrName(n), how: 'read as the ' + ord[0].trim() };
-    }
-    return null;
+    return best;
   }
 
-  return { hav, fmtKm, host, arrName, arrFrom };
+  return { hav, fmtKm, host, arrFromLatLng };
 })();

@@ -60,7 +60,7 @@
       const stays = {}, activeStay = {};
       Object.keys(saved.stays).forEach(tripId => {
         const v = saved.stays[tripId];
-        const entry = Array.isArray(v) ? v[0] : (v && { id: 'stay-' + tripId, name: v.name, spotId: v.spotId, arr: v.arr, la: v.la, ln: v.ln, start: v.start || '', end: v.end || '' });
+        const entry = Array.isArray(v) ? v[0] : (v && { id: 'stay-' + tripId, name: v.name, spotId: v.spotId, la: v.la, ln: v.ln, start: v.start || '', end: v.end || '' });
         if (entry) { stays[tripId] = [entry]; activeStay[tripId] = entry.id; }
       });
       return { stays, activeStay };
@@ -70,7 +70,7 @@
 
   function makeInitialState() {
     const saved = S.load();
-    const defaultStay = { id: 'stay-seed', name: 'les patios du marais', spotId: null, arr: '3e', la: 48.8610, ln: 2.3640, start: '', end: '' };
+    const defaultStay = { id: 'stay-seed', name: 'les patios du marais', spotId: null, la: 48.8610, ln: 2.3640, start: '', end: '' };
     const { stays, activeStay } = migrateStays(saved, defaultStay);
     return {
       screen: 'trips', tripId: 'paris', view: 'map', query: '', off: {},
@@ -82,8 +82,8 @@
       // Google-Places-backed stays entered directly — drop any that survive in old saved data.
       spots: ((saved && saved.spots) || D.seedSpots).filter(s => s.c !== 'hotel'),
       stays, activeStay,
-      sf: { name: '', arr: '3e', start: '', end: '', googleResults: [], googleSearching: false, googlePlace: null },
-      f: { name: '', cat: 'restaurant', arr: '3e', addr: '', arrManual: false, pickerOpen: false, url: '', note: '', googleResults: [], googleSearching: false, googlePlace: null },
+      sf: { name: '', start: '', end: '', googleResults: [], googleSearching: false, googlePlace: null },
+      f: { name: '', cat: 'restaurant', addr: '', url: '', note: '', googleResults: [], googleSearching: false, googlePlace: null },
       nt: { name: '', legs: [newLeg()], location: null, locResults: [], locSearching: false, stays: [], stayDraft: emptyStayDraft() },
       et: { name: '', legs: [newLeg()], location: null, locResults: [], locSearching: false }
     };
@@ -97,7 +97,7 @@
     const q = state.query.trim().toLowerCase();
     return allSpotsForTrip(state)
       .filter(s => !state.off[s.c])
-      .filter(s => !q || (s.n + ' ' + (s.no || '') + ' ' + (s.t || []).join(' ') + ' ' + s.a).toLowerCase().indexOf(q) > -1);
+      .filter(s => !q || (s.n + ' ' + (s.no || '') + ' ' + (s.t || []).join(' ') + ' ' + (G.arrFromLatLng(s.la, s.ln) || '')).toLowerCase().indexOf(q) > -1);
   }
 
   function stayList(state) { return state.stays[state.tripId] || []; }
@@ -119,7 +119,7 @@
     const stay = currentStay(state);
     const km = distanceTo(state, s);
     return {
-      id: s.id, name: s.n, note: s.no || 'no note yet', arr: s.a, fill: c.fill, ink: c.ink,
+      id: s.id, name: s.n, note: s.no || 'no note yet', arr: G.arrFromLatLng(s.la, s.ln), fill: c.fill, ink: c.ink,
       cat: c.label,
       dist: !stay ? '—' : (stay.spotId === s.id ? 'your stay' : G.fmtKm(km)),
       bg: s.visited ? '#1a1a1a' : '#131313',
@@ -575,7 +575,7 @@
                   <div style=${{ flex: 1, minWidth: 0 }}>
                     <div style=${{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
                       <span style=${{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.2px', textTransform: 'lowercase' }}>${s.n}</span>
-                      <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, color: '#9e9e9e' }}>${s.a}</span>
+                      <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, color: '#9e9e9e' }}>${d.arr}</span>
                     </div>
                     <div style=${{ fontSize: 13, color: '#b3b3b3', lineHeight: 1.4, marginTop: 3 }}>${d.note}</div>
                     <div style=${{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
@@ -644,6 +644,7 @@
     const d = state.spots.find(s => s.id === state.detail);
     if (!d) return null;
     const c = D.cats[d.c];
+    const arr = G.arrFromLatLng(d.la, d.ln);
     const stay = currentStay(state);
     const km = distanceTo(state, d);
 
@@ -663,7 +664,7 @@
           <div style=${{ padding: '0 16px' }}>
             <div style=${{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <span style=${{ width: 11, height: 11, borderRadius: 999, background: c.fill }}/>
-              <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#b3b3b3' }}>${c.label} · ${d.a}</span>
+              <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#b3b3b3' }}>${arr ? c.label + ' · ' + arr : c.label}</span>
             </div>
             <h2 style=${{ fontSize: 32, lineHeight: 1.02, letterSpacing: '-0.7px', fontWeight: 600, textTransform: 'lowercase', margin: '0 0 8px' }}>${d.n}</h2>
             ${d.addr ? html`<div style=${{ fontSize: 14.5, lineHeight: 1.4, color: '#b3b3b3', margin: '0 0 12px' }}>${d.addr}</div>` : null}
@@ -714,14 +715,11 @@
 
   function AddSpotSheet({ state, patch, bump }) {
     const f = state.f;
-    const inferred = G.arrFrom(f.addr);
-    const activeArr = f.arrManual ? f.arr : (inferred ? inferred.arr : f.arr);
+    const gp = f.googlePlace;
+    const arr = gp && gp.la != null ? G.arrFromLatLng(gp.la, gp.ln) : null;
     const close = () => patch({ addOpen: false });
     const setField = (k) => (e) => patch({ f: { ...state.f, [k]: e.target.value } });
     const pickCat = (k) => () => patch({ f: { ...state.f, cat: k } });
-    const pickArr = (a) => () => patch({ f: { ...state.f, arr: a, arrManual: true } });
-    const toggleArrPicker = () => patch({ f: { ...state.f, pickerOpen: !state.f.pickerOpen } });
-    const showArrPicker = !inferred || f.pickerOpen;
 
     const doGoogleSearch = async () => {
       const q = (f.name + ' ' + (f.addr || '')).trim();
@@ -735,13 +733,7 @@
       const details = await window.PinsPlaces.getDetails(r.id);
       patch(prev => {
         if (!details) return { f: { ...prev.f, googleSearching: false } };
-        const hit = G.arrFrom(details.address);
-        return {
-          f: {
-            ...prev.f, googleSearching: false, googlePlace: details,
-            addr: details.address || prev.f.addr, arr: hit ? hit.arr : prev.f.arr, arrManual: false
-          }
-        };
+        return { f: { ...prev.f, googleSearching: false, googlePlace: details, addr: details.address || prev.f.addr } };
       });
     };
     const clearGoogle = () => patch({ f: { ...state.f, googlePlace: null } });
@@ -749,12 +741,14 @@
     const saveSpot = () => {
       const name = f.name.trim();
       if (!name) return;
-      const gp = f.googlePlace;
       let la, ln;
       if (gp && gp.la != null && gp.ln != null) {
         la = gp.la; ln = gp.ln;
       } else {
-        const base = D.arrs[activeArr] || D.arrs['3e'];
+        // No exact place picked — drop the pin near the trip's destination (or Paris,
+        // the seed trip's home base) with a small deterministic jitter so pins don't stack.
+        const trip = state.trips.find(t => t.id === state.tripId);
+        const base = (trip && trip.location && trip.location.la != null) ? [trip.location.la, trip.location.ln] : [48.8566, 2.3522];
         const num = parseInt((f.addr.match(/\d{1,4}/) || ['' + (state.spots.length * 7)])[0], 10) || 0;
         la = base[0] + ((((num * 61) % 100) / 100) - 0.5) * 0.006;
         ln = base[1] + ((((num * 37) % 100) / 100) - 0.5) * 0.010;
@@ -762,13 +756,13 @@
       const id = name.toLowerCase() + '-' + state.spots.length;
       const s = {
         id, idx: state.spots.length, n: name.toLowerCase(),
-        c: f.cat, a: activeArr, addr: f.addr.trim() || undefined,
+        c: f.cat, addr: f.addr.trim() || undefined,
         la, ln, no: f.note, u: f.url || undefined, t: [], visited: false, trip: state.tripId,
         h: (gp && gp.hours) || undefined, p: (gp && gp.price) || undefined
       };
       patch({
         spots: state.spots.concat([s]), addOpen: false, sel: s.id, detail: s.id,
-        f: { name: '', cat: f.cat, arr: activeArr, addr: '', arrManual: false, pickerOpen: false, url: '', note: '', googleResults: [], googleSearching: false, googlePlace: null }
+        f: { name: '', cat: f.cat, addr: '', url: '', note: '', googleResults: [], googleSearching: false, googlePlace: null }
       });
       if (gp && gp.photoName) {
         window.PinsPlaces.fetchPhotoBlob(gp.photoName, 800).then(async (blob) => {
@@ -827,23 +821,14 @@
             <div style=${MONO_HEADER}>street address</div>
             <input value=${f.addr} onChange=${setField('addr')} placeholder="35 rue de bretagne, 75003"
               style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 15, marginBottom: 10 }}/>
-            ${inferred ? html`
-              <div style=${{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 9, marginBottom: 14 }}>
-                <span style=${{ flex: 'none', background: '#fff', color: '#131313', borderRadius: 999, padding: '6px 11px', fontSize: 12.5, fontWeight: 600, textTransform: 'lowercase', whiteSpace: 'nowrap' }}>${activeArr} · ${D.hoods[activeArr] || ''}</span>
-                <button type="button" onClick=${toggleArrPicker} style=${{ flex: 'none', marginLeft: 'auto', fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#fff', borderBottom: '1px solid #737373' }}>change</button>
-                <span style=${{ flexBasis: '100%', fontFamily: "'Character Mono',monospace", fontSize: 10, lineHeight: 1.4, color: '#9e9e9e' }}>${f.arrManual ? 'you picked this one' : inferred.how}</span>
+            ${arr ? html`
+              <div style=${{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14 }}>
+                <span style=${{ flex: 'none', background: '#fff', color: '#131313', borderRadius: 999, padding: '6px 11px', fontSize: 12.5, fontWeight: 600, textTransform: 'lowercase', whiteSpace: 'nowrap' }}>${arr} · ${D.hoods[arr] || ''}</span>
+                <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, color: '#9e9e9e' }}>read from where the pin landed</span>
               </div>
             ` : html`
-              <p style=${{ fontSize: 13, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 10px' }}>add a postal code or a neighborhood name and the pin places itself. or pick the arrondissement:</p>
+              <p style=${{ fontSize: 13, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 10px' }}>look it up on google above and the pin — and its arrondissement — place themselves.</p>
             `}
-            ${showArrPicker ? html`
-              <div style=${{ display: 'flex', gap: 7, overflowX: 'auto', maxWidth: '100%', paddingBottom: 14 }}>
-                ${Object.keys(D.arrs).map(a => { const on = activeArr === a; return html`
-                  <button type="button" key=${a} onClick=${pickArr(a)}
-                    style=${{ flex: 'none', borderRadius: 999, padding: '8px 13px', background: on ? '#fff' : '#131313', color: on ? '#131313' : '#b3b3b3', border: `1px solid ${on ? '#fff' : '#333333'}`, fontFamily: "'Character Mono',monospace", fontSize: 11, whiteSpace: 'nowrap' }}>${a} ${D.hoods[a] || ''}</button>
-                `; })}
-              </div>
-            ` : null}
             <div style=${MONO_HEADER}>source link</div>
             <input value=${f.url} onChange=${setField('url')} placeholder="paste the tiktok or instagram url"
               style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 15, marginBottom: 14 }}/>
@@ -871,17 +856,7 @@
     const near = trip && trip.location ? { la: trip.location.la, ln: trip.location.ln } : undefined;
     const close = () => patch({ stayOpen: false, stayEditId: null });
 
-    const setSFName = (e) => {
-      const v = e.target.value;
-      // Once a place is picked, this field is just the editable display name —
-      // don't let typing re-trigger the arrondissement guess or drop the pick.
-      if (sf.googlePlace) { patch({ sf: { ...sf, name: v } }); return; }
-      const hit = G.arrFrom(v);
-      patch({ sf: { ...sf, name: v, arr: hit ? hit.arr : sf.arr } });
-    };
-    const sfHit = G.arrFrom(sf.name);
-    const sfNote = sfHit ? sfHit.arr + ' · ' + (D.hoods[sfHit.arr] || '') + ' — ' + sfHit.how : '';
-    const pickArr = (a) => () => patch({ sf: { ...sf, arr: a } });
+    const setSFName = (e) => patch({ sf: { ...sf, name: e.target.value } });
     const setStart = (e) => patch({ sf: { ...sf, start: e.target.value } });
     const setEnd = (e) => patch({ sf: { ...sf, end: e.target.value } });
 
@@ -897,19 +872,16 @@
     const changeStayGoogle = () => patch({ sf: { ...sf, googlePlace: null, name: '', googleResults: [] } });
 
     const addStay = () => {
-      let entry;
-      if (sf.googlePlace) {
-        const nm = sf.name.trim(); if (!nm) return;
-        entry = { id: 'stay-' + Date.now(), name: nm.toLowerCase(), spotId: null, arr: null, address: sf.googlePlace.address, la: sf.googlePlace.la, ln: sf.googlePlace.ln, start: sf.start, end: sf.end };
-      } else {
-        const nm = sf.name.trim(); if (!nm) return;
-        const b = D.arrs[sf.arr];
-        entry = { id: 'stay-' + Date.now(), name: nm.toLowerCase(), spotId: null, arr: sf.arr, la: b[0], ln: b[1], start: sf.start, end: sf.end };
-      }
+      const nm = sf.name.trim(); if (!nm) return;
+      // No exact place picked — fall back to the trip's own destination, if it has one.
+      const loc = trip && trip.location;
+      const entry = sf.googlePlace
+        ? { id: 'stay-' + Date.now(), name: nm.toLowerCase(), spotId: null, address: sf.googlePlace.address, la: sf.googlePlace.la, ln: sf.googlePlace.ln, start: sf.start, end: sf.end }
+        : { id: 'stay-' + Date.now(), name: nm.toLowerCase(), spotId: null, address: null, la: loc ? loc.la : null, ln: loc ? loc.ln : null, start: sf.start, end: sf.end };
       patch({
         stays: { ...state.stays, [state.tripId]: list.concat([entry]) },
         activeStay: { ...state.activeStay, [state.tripId]: entry.id },
-        sf: { name: '', arr: sf.arr, start: '', end: '', googleResults: [], googleSearching: false, googlePlace: null }
+        sf: { name: '', start: '', end: '', googleResults: [], googleSearching: false, googlePlace: null }
       });
     };
 
@@ -948,12 +920,14 @@
                 ${list.map(entry => {
                   const isActive = activeId === entry.id;
                   const editing = state.stayEditId === entry.id;
+                  const inferredArr = !entry.address ? G.arrFromLatLng(entry.la, entry.ln) : null;
+                  const place = entry.address || (inferredArr ? inferredArr + ' · ' + (D.hoods[inferredArr] || '') : null);
                   return html`
                     <div key=${entry.id} style=${{ border: `1px solid ${isActive ? '#fff' : '#333333'}`, borderRadius: 18, padding: 13 }}>
                       <div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <div style=${{ flex: 1, minWidth: 0 }}>
                           <div style=${{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.2px', textTransform: 'lowercase', lineHeight: 1.2 }}>${entry.name}</div>
-                          <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${[entry.arr || entry.address, fmtDateRange(entry.start, entry.end)].filter(Boolean).join(' · ') || 'no dates yet'}</div>
+                          <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#9e9e9e', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${[place, fmtDateRange(entry.start, entry.end)].filter(Boolean).join(' · ') || 'no dates yet'}</div>
                         </div>
                         <button type="button" onClick=${setActive(entry)}
                           style=${{ flex: 'none', fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', borderRadius: 999, padding: '6px 11px', background: isActive ? '#fff' : 'transparent', color: isActive ? '#131313' : '#b3b3b3', border: `1px solid ${isActive ? '#fff' : '#333333'}`, whiteSpace: 'nowrap' }}>${isActive ? 'current' : 'switch to this'}</button>
@@ -1005,13 +979,7 @@
               </div>
             ` : null}
             ${!window.PinsPlaces.isConfigured() ? html`
-              ${sfHit ? html`<div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, color: '#9e9e9e', margin: '0 0 10px' }}>${sfNote}</div>` : null}
-              <div style=${{ display: 'flex', gap: 7, overflowX: 'auto', maxWidth: '100%', paddingBottom: 12 }}>
-                ${Object.keys(D.arrs).map(a => { const on = sf.arr === a; return html`
-                  <button type="button" key=${a} onClick=${pickArr(a)}
-                    style=${{ flex: 'none', borderRadius: 999, padding: '8px 13px', background: on ? '#fff' : 'transparent', color: on ? '#131313' : '#b3b3b3', border: `1px solid ${on ? '#fff' : '#333333'}`, fontFamily: "'Character Mono',monospace", fontSize: 11 }}>${a} ${D.hoods[a] || ''}</button>
-                `; })}
-              </div>
+              <p style=${{ fontSize: 12.5, lineHeight: 1.4, color: '#9e9e9e', margin: '0 0 12px' }}>google lookup isn't configured, so this stay will save without a map location — just the name and dates.</p>
             ` : null}
 
             <div style=${MONO_HEADER}>dates for this stay</div>
@@ -1041,7 +1009,7 @@
       const loc = nt.stayDraft.location;
       if (!loc) return;
       const nm = (nt.stayDraft.name.trim() || loc.name).toLowerCase();
-      const entry = { id: 'stay-' + Date.now(), name: nm, spotId: null, arr: null, address: loc.address, la: loc.la, ln: loc.ln, start: nt.stayDraft.start, end: nt.stayDraft.end };
+      const entry = { id: 'stay-' + Date.now(), name: nm, spotId: null, address: loc.address, la: loc.la, ln: loc.ln, start: nt.stayDraft.start, end: nt.stayDraft.end };
       patch({ nt: { ...nt, stays: nt.stays.concat([entry]), stayDraft: emptyStayDraft() } });
     };
     const removeDraftStay = (id) => () => patch({ nt: { ...nt, stays: nt.stays.filter(s => s.id !== id) } });
