@@ -3,5 +3,5 @@
 // This same key drives the map itself (Maps JavaScript API) — make sure both
 // "Places API (New)" and "Maps JavaScript API" are enabled for it in Cloud Console.
 window.PINS_PLACES_CONFIG = {
-  apiKey: 'AIzaSyDbka9b32_DwgxN97RipOQpozDeHX0pJRQ'
+  apiKey: 'AIzaSyABr0cxhC_LUZ1QMYxn7bH5m3FTA_YbjfQ'
 };
