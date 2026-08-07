@@ -45,7 +45,7 @@ input:focus,textarea:focus{outline:2px solid #fff;outline-offset:0}
 .hoverable:hover{transform:scale(1.02)}
 .hoverable:active{transform:scale(.985)}
 
-.btn-pill-outline{border:1px solid #494949;transition:background 150ms,color 150ms,border-color 150ms}
+.btn-pill-outline{border:1px solid #494949;color:#fff;transition:background 150ms,color 150ms,border-color 150ms}
 .btn-pill-outline:hover{background:#fff;color:#131313;border-color:#fff}
 
 .link-fade{color:#b3b3b3;transition:color 150ms}

@@ -403,7 +403,7 @@
         <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 26 }}>
           <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 15, letterSpacing: '0.02em' }}>(pins)</div>
           <button type="button" className="btn-pill-outline" onClick=${() => patch({ newTripOpen: true })}
-            style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#fff', borderRadius: 999, padding: '7px 13px', whiteSpace: 'nowrap' }}>new trip</button>
+            style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', borderRadius: 999, padding: '7px 13px', whiteSpace: 'nowrap' }}>new trip</button>
         </div>
         <h1 style=${{ fontSize: 42, lineHeight: 1, letterSpacing: '-0.9px', fontWeight: 600, textTransform: 'lowercase', margin: '0 0 10px' }}>your trips</h1>
         <p style=${{ fontSize: 16, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 26px', maxWidth: 300 }}>every rec you screenshotted, dropped on one map. open a trip to see it.</p>
