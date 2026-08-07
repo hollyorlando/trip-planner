@@ -77,9 +77,9 @@ window.PinsData = (function () {
   ];
 
   const seedTrips = [
-    { id: 'paris', name: 'paris', legs: [{ id: 'leg-paris-0', start: '2026-08-23', end: '2026-08-25' }], fill: '#fff59e', geo: true, location: null },
-    { id: 'tokyo', name: 'tokyo', legs: [{ id: 'leg-tokyo-0', start: '2027-03-02', end: '2027-03-12' }], fill: '#df91f2', geo: false, location: null },
-    { id: 'amalfi', name: 'amalfi coast', legs: [{ id: 'leg-amalfi-0', start: '2027-06-14', end: '2027-06-21' }], fill: '#abf5ed', geo: false, location: null }
+    { id: 'paris', name: 'paris', legs: [{ id: 'leg-paris-0', start: '2026-08-23', end: '2026-08-25' }], fill: '#fff59e', location: null },
+    { id: 'tokyo', name: 'tokyo', legs: [{ id: 'leg-tokyo-0', start: '2027-03-02', end: '2027-03-12' }], fill: '#df91f2', location: null },
+    { id: 'amalfi', name: 'amalfi coast', legs: [{ id: 'leg-amalfi-0', start: '2027-06-14', end: '2027-06-21' }], fill: '#abf5ed', location: null }
   ];
 
   const seedSpots = seed.map((s, i) => ({ id: s.n + '-' + i, idx: i, ...s, visited: false, trip: 'paris' }));

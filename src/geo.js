@@ -1,10 +1,6 @@
-// Projection + distance + light "geocoding" helpers for the stylized Paris map.
+// Distance + light "geocoding" helpers.
 window.PinsGeo = (function () {
   const D = window.PinsData;
-
-  // Map lng/lat into the map-paris.svg's 1000x672 local coordinate space.
-  function X(ln) { return (ln - 2.26) / 0.14 * 1000; }
-  function Y(la) { return (48.898 - la) / 0.062 * 672; }
 
   function hav(a, b) {
     const R = 6371, r = Math.PI / 180;
@@ -48,5 +44,5 @@ window.PinsGeo = (function () {
     return null;
   }
 
-  return { X, Y, hav, fmtKm, host, arrName, arrFrom };
+  return { hav, fmtKm, host, arrName, arrFrom };
 })();

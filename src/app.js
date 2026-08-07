@@ -3,7 +3,7 @@
   const G = window.PinsGeo;
   const S = window.PinsStorage;
   const html = htm.bind(React.createElement);
-  const { useState, useEffect, useRef } = React;
+  const { useState, useEffect, useRef, useCallback } = React;
 
   const MONO_HEADER = { fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#9e9e9e', marginBottom: 7 };
   const DATE_INPUT_STYLE = { flex: 1, minWidth: 0, border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 14, background: 'transparent', colorScheme: 'dark' };
@@ -47,7 +47,7 @@
   // "legs" (e.g. visiting the same place across two separate weeks).
   function migrateTripLegs(trips) {
     return trips.map(t => (Array.isArray(t.legs) && t.legs.length) ? t : {
-      id: t.id, name: t.name, fill: t.fill, geo: !!t.geo, location: t.location || null,
+      id: t.id, name: t.name, fill: t.fill, location: t.location || null,
       legs: [{ id: 'leg-' + t.id + '-0', start: t.start || '', end: t.end || '' }]
     });
   }
@@ -77,7 +77,6 @@
       sel: null, detail: null, expanded: false, addOpen: false, newTripOpen: false, stayOpen: false,
       confirmDeleteTripId: null, editTripId: null,
       stayEditId: null, stayEditStart: '', stayEditEnd: '',
-      zoom: 1.9, tx: 0, ty: 0,
       trips: migrateTripLegs((saved && saved.trips) || D.seedTrips),
       // Hotel spots (the old "pinned/saved hotels" pick-list) were retired in favor of
       // Google-Places-backed stays entered directly — drop any that survive in old saved data.
@@ -130,54 +129,29 @@
     };
   }
 
-  // ---------- map math ----------
+  // ---------- map fitting (real lat/lng, driven by the google.maps.Map instance) ----------
 
-  function fitToSpots(state, mapSize) {
-    const W = mapSize.w || 402, H = mapSize.h || 386;
-    const BASE = W / 1000;
-    const list = filteredSpots(state);
-    if (!list.length) {
-      const zoom = 1.9, sc = BASE * zoom;
-      return { zoom, tx: W / 2 - 500 * sc, ty: H / 2 - 336 * sc };
+  // Centers/zooms the live map around whatever the trip currently has: its spots
+  // (respecting active filters/search) if any, else its destination, else the world.
+  function fitMapToTrip(map, state) {
+    if (!map || !window.google) return;
+    const maps = window.google.maps;
+    const trip = state.trips.find(t => t.id === state.tripId);
+    const spots = filteredSpots(state).filter(s => s.la != null && s.ln != null);
+    if (spots.length === 1) {
+      map.setCenter({ lat: spots[0].la, lng: spots[0].ln });
+      map.setZoom(15);
+    } else if (spots.length > 1) {
+      const bounds = new maps.LatLngBounds();
+      spots.forEach(s => bounds.extend({ lat: s.la, lng: s.ln }));
+      map.fitBounds(bounds, 60);
+    } else if (trip && trip.location && trip.location.la != null) {
+      map.setCenter({ lat: trip.location.la, lng: trip.location.ln });
+      map.setZoom(12);
+    } else {
+      map.setCenter({ lat: 20, lng: 0 });
+      map.setZoom(2);
     }
-    const xs = list.map(s => G.X(s.ln)), ys = list.map(s => G.Y(s.la));
-    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-    const pad = 70;
-    const sc = Math.max(0.28, Math.min(2.6, Math.min(W / (x1 - x0 + pad * 2), H / (y1 - y0 + pad * 2))));
-    return { zoom: sc / BASE, tx: W / 2 - ((x0 + x1) / 2) * sc, ty: H / 2 - ((y0 + y1) / 2) * sc };
-  }
-
-  function zoomBy(state, mapSize, k) {
-    const W = mapSize.w || 402, H = mapSize.h || 386;
-    const BASE = W / 1000;
-    const sc = BASE * state.zoom, ns = Math.max(0.28, Math.min(3.2, sc * k));
-    const cx = W / 2, cy = H / 2;
-    return { zoom: ns / BASE, tx: cx - (cx - state.tx) * (ns / sc), ty: cy - (cy - state.ty) * (ns / sc) };
-  }
-
-  // Re-center the map on one spot without changing zoom (used when picking a spot from the sheet).
-  function centerOnSpot(state, mapSize, s) {
-    const W = mapSize.w || 402, H = mapSize.h || 386;
-    const BASE = W / 1000;
-    const sc = BASE * state.zoom;
-    return { tx: W / 2 - G.X(s.ln) * sc, ty: H / 2 - G.Y(s.la) * sc };
-  }
-
-  function computePins(state, mapSize) {
-    const list = filteredSpots(state);
-    const staySpotIds = stayList(state).map(s => s.spotId).filter(Boolean);
-    const BASE = (mapSize.w || 402) / 1000;
-    const sc = BASE * state.zoom;
-    return list.filter(s => !staySpotIds.includes(s.id)).map(s => {
-      const selq = state.sel === s.id, size = selq ? 36 : 26;
-      return {
-        id: s.id, spot: s, fill: D.cats[s.c].fill, size, dot: selq ? 9 : 7,
-        left: Math.round(state.tx + G.X(s.ln) * sc),
-        top: Math.round(state.ty + G.Y(s.la) * sc),
-        z: selq ? 4 : 2, op: s.visited && !selq ? 0.45 : 1,
-        showLabel: selq, name: s.n
-      };
-    });
   }
 
   // ---------- icons ----------
@@ -420,69 +394,74 @@
 
   // ---------- map view ----------
 
-  function MapView({ state, patch, mapSize, mapWrapRef, onMapPointerDown, onMapWheel, onMapClick }) {
+  function MapView({ state, patch, visible, mapContainerRef, overlayNodes, onZoomIn, onZoomOut, onRecenter }) {
     const trip = state.trips.find(t => t.id === state.tripId);
     const stay = currentStay(state);
     const stays = stayList(state);
     const activeStayId = state.activeStay[state.tripId];
-    const BASE = (mapSize.w || 402) / 1000;
-    const sc = BASE * state.zoom;
-    const pins = computePins(state, mapSize);
-    const hasMap = !!(trip && trip.geo);
+    const staySpotIds = stays.map(s => s.spotId).filter(Boolean);
+    const pins = filteredSpots(state).filter(s => !staySpotIds.includes(s.id));
     const all = allSpotsForTrip(state);
-    const noMap = !hasMap && !all.length;
+    const noMap = !all.length && !(trip && trip.location && trip.location.la != null);
     const asList = state.expanded;
     const sheetH = !all.length ? 132 : (asList ? 380 : 196);
 
-    return html`
-      <div style=${{ flex: 1, position: 'relative', overflow: 'hidden', background: '#131313' }}>
-        <div ref=${mapWrapRef} className="map-viewport" onPointerDown=${onMapPointerDown} onWheel=${onMapWheel} onClick=${onMapClick}
-          style=${{ position: 'absolute', inset: 0, overflow: 'hidden', cursor: 'grab' }}>
-          ${hasMap ? html`
-            <div style=${{ position: 'absolute', left: 0, top: 0, width: 1000, height: 672, transform: `translate(${state.tx}px,${state.ty}px) scale(${sc})`, transformOrigin: '0 0', pointerEvents: 'none' }}>
-              <img src="./src/map-paris.svg" alt="" draggable="false" style=${{ position: 'absolute', left: -240, top: -180, width: 1700, height: 1200, display: 'block' }} />
-            </div>
-          ` : null}
-          ${pins.map(p => html`
-            <div key=${p.id} onClick=${(e) => {
-              e.stopPropagation();
-              if (state.sel === p.id) patch({ detail: p.id, expanded: false });
-              else patch({ sel: p.id, expanded: false });
-            }}
-              style=${{ position: 'absolute', left: p.left, top: p.top, zIndex: p.z, transform: 'translate(-50%,-50%)', cursor: 'pointer' }}>
-              <div style=${{ width: p.size, height: p.size, borderRadius: 999, background: p.fill, border: '2.5px solid #131313', boxShadow: '0 2px 8px rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: p.op }}>
-                <div style=${{ width: p.dot, height: p.dot, borderRadius: 999, background: D.cats[p.spot.c].ink, opacity: 0.5 }}/>
-              </div>
-              ${p.showLabel ? html`<div style=${{ position: 'absolute', left: '50%', top: p.size / 2 + 7, transform: 'translateX(-50%)', background: '#fff', color: '#131313', padding: '5px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600, letterSpacing: '-0.1px', whiteSpace: 'nowrap', textTransform: 'lowercase', pointerEvents: 'none' }}>${p.name}</div>` : null}
-            </div>
-          `)}
-          ${stays.map(s => {
-            const isActive = s.id === activeStayId;
-            const dr = stays.length > 1 ? fmtDateRange(s.start, s.end) : '';
-            return html`
-              <div key=${s.id} onClick=${(e) => { e.stopPropagation(); patch({ stayOpen: true }); }}
-                style=${{ position: 'absolute', left: Math.round(state.tx + G.X(s.ln) * sc), top: Math.round(state.ty + G.Y(s.la) * sc), transform: 'translate(-50%,-50%)', zIndex: isActive ? 5 : 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
-                <div style=${{ width: isActive ? 34 : 28, height: isActive ? 34 : 28, borderRadius: 12, background: isActive ? '#fff' : '#131313', border: isActive ? 'none' : '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 3px 10px rgba(0,0,0,0.6)' }}>${HouseIcon({ size: isActive ? 19 : 15, color: isActive ? '#131313' : '#fff' })}</div>
-                <div style=${{ background: isActive ? '#fff' : '#131313', color: isActive ? '#131313' : '#fff', border: isActive ? 'none' : '1px solid #fff', padding: '4px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, letterSpacing: '-0.1px', whiteSpace: 'nowrap', textTransform: 'lowercase', pointerEvents: 'none' }}>${s.name}${dr ? ' · ' + dr : ''}</div>
-              </div>
-            `;
-          })}
+    // Pin/stay markers are plain HTML nodes pinned to a lat/lng by google.maps.OverlayView
+    // (see gmaps.js) and portaled here so their contents stay ordinary declarative JSX.
+    const pinContent = (s) => {
+      const selq = state.sel === s.id, size = selq ? 36 : 26, cat = D.cats[s.c];
+      return html`
+        <div onClick=${(e) => {
+          e.stopPropagation();
+          if (state.sel === s.id) patch({ detail: s.id, expanded: false });
+          else patch({ sel: s.id, expanded: false });
+        }}
+          style=${{ position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)', zIndex: selq ? 4 : 2, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
+          <div style=${{ width: size, height: size, borderRadius: 999, background: cat.fill, border: '2.5px solid #131313', boxShadow: '0 2px 8px rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: s.visited && !selq ? 0.45 : 1 }}>
+            <div style=${{ width: selq ? 9 : 7, height: selq ? 9 : 7, borderRadius: 999, background: cat.ink, opacity: 0.5 }}/>
+          </div>
+          ${selq ? html`<div style=${{ background: '#fff', color: '#131313', padding: '5px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600, letterSpacing: '-0.1px', whiteSpace: 'nowrap', textTransform: 'lowercase' }}>${s.n}</div>` : null}
         </div>
+      `;
+    };
+
+    const stayContent = (s) => {
+      const isActive = s.id === activeStayId;
+      const dr = stays.length > 1 ? fmtDateRange(s.start, s.end) : '';
+      return html`
+        <div onClick=${(e) => { e.stopPropagation(); patch({ stayOpen: true }); }}
+          style=${{ position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)', zIndex: isActive ? 5 : 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+          <div style=${{ width: isActive ? 34 : 28, height: isActive ? 34 : 28, borderRadius: 12, background: isActive ? '#fff' : '#131313', border: isActive ? 'none' : '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 3px 10px rgba(0,0,0,0.6)' }}>${HouseIcon({ size: isActive ? 19 : 15, color: isActive ? '#131313' : '#fff' })}</div>
+          <div style=${{ background: isActive ? '#fff' : '#131313', color: isActive ? '#131313' : '#fff', border: isActive ? 'none' : '1px solid #fff', padding: '4px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, letterSpacing: '-0.1px', whiteSpace: 'nowrap', textTransform: 'lowercase' }}>${s.name}${dr ? ' · ' + dr : ''}</div>
+        </div>
+      `;
+    };
+
+    return html`
+      <div style=${{ flex: 1, position: 'relative', overflow: 'hidden', background: '#131313', display: visible ? 'block' : 'none' }}>
+        <div ref=${mapContainerRef} className="map-viewport" style=${{ position: 'absolute', inset: 0 }}/>
+
+        ${pins.map(s => overlayNodes['spot:' + s.id]
+          ? ReactDOM.createPortal(pinContent(s), overlayNodes['spot:' + s.id], s.id)
+          : null)}
+        ${stays.map(s => overlayNodes['stay:' + s.id]
+          ? ReactDOM.createPortal(stayContent(s), overlayNodes['stay:' + s.id], s.id)
+          : null)}
 
         ${noMap ? html`
           <div style=${{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '0 46px', textAlign: 'center', pointerEvents: 'none' }}>
             <div style=${{ fontSize: 19, fontWeight: 600, letterSpacing: '-0.3px', textTransform: 'lowercase', color: '#fff' }}>no map yet</div>
-            <p style=${{ fontSize: 14, lineHeight: 1.45, color: '#b3b3b3', margin: 0 }}>drop your first spot and the map draws itself around it.</p>
+            <p style=${{ fontSize: 14, lineHeight: 1.45, color: '#b3b3b3', margin: 0 }}>set a destination or drop your first spot and the map centers itself.</p>
           </div>
         ` : null}
 
         <div style=${{ position: 'absolute', right: 14, top: 14, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 5 }}>
           <div style=${{ background: '#131313', border: '1px solid #333333', borderRadius: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <button type="button" className="icon-btn" onClick=${() => patch(zoomBy(state, mapSize, 1.3))} style=${{ width: 40, height: 40, fontSize: 20, fontWeight: 500, lineHeight: 1, color: '#fff' }}>+</button>
+            <button type="button" className="icon-btn" onClick=${onZoomIn} style=${{ width: 40, height: 40, fontSize: 20, fontWeight: 500, lineHeight: 1, color: '#fff' }}>+</button>
             <div style=${{ height: 1, background: '#333333' }}/>
-            <button type="button" className="icon-btn" onClick=${() => patch(zoomBy(state, mapSize, 0.77))} style=${{ width: 40, height: 40, fontSize: 20, fontWeight: 500, lineHeight: 1, color: '#fff' }}>–</button>
+            <button type="button" className="icon-btn" onClick=${onZoomOut} style=${{ width: 40, height: 40, fontSize: 20, fontWeight: 500, lineHeight: 1, color: '#fff' }}>–</button>
           </div>
-          <button type="button" className="icon-btn" onClick=${() => patch(fitToSpots(state, mapSize))}
+          <button type="button" className="icon-btn" onClick=${onRecenter}
             style=${{ width: 40, height: 40, background: '#131313', border: '1px solid #333333', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>${RecenterIcon()}</button>
         </div>
 
@@ -495,12 +474,12 @@
         <button type="button" className="fab-btn" onClick=${() => patch({ addOpen: true })}
           style=${{ position: 'absolute', right: 16, zIndex: 8, bottom: sheetH + 14, width: 56, height: 56, borderRadius: 999, background: '#fff', color: '#131313', fontSize: 28, fontWeight: 400, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
 
-        ${BottomSheet({ state, patch, mapSize, sheetH, asList, all })}
+        ${BottomSheet({ state, patch, sheetH, asList, all })}
       </div>
     `;
   }
 
-  function BottomSheet({ state, patch, mapSize, sheetH, asList, all }) {
+  function BottomSheet({ state, patch, sheetH, asList, all }) {
     const list = filteredSpots(state);
     const sorted = list.slice().sort((a, b) => distanceTo(state, a) - distanceTo(state, b));
     const empty = !all.length;
@@ -513,7 +492,7 @@
     // tapping it again (already selected) opens the full detail screen.
     const selectOrOpen = (s) => () => {
       if (state.sel === s.id) { patch({ detail: s.id }); return; }
-      patch(prev => ({ sel: s.id, ...centerOnSpot(prev, mapSize, s) }));
+      patch({ sel: s.id });
     };
 
     return html`
@@ -566,7 +545,7 @@
     `;
   }
 
-  function ListView({ state, patch, all }) {
+  function ListView({ state, patch, all, visible }) {
     const list = filteredSpots(state);
     const groups = Object.keys(D.cats).filter(k => all.some(s => s.c === k) && !state.off[k]).map(k => {
       const items = list.filter(s => s.c === k).slice().sort((a, b) => distanceTo(state, a) - distanceTo(state, b));
@@ -575,7 +554,7 @@
     const empty = !groups.length;
 
     return html`
-      <div style=${{ flex: 1, overflowY: 'auto', padding: '0 16px 40px' }}>
+      <div style=${{ flex: 1, overflowY: 'auto', padding: '0 16px 40px', display: visible ? 'block' : 'none' }}>
         ${empty ? html`
           <div style=${{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '70px 30px 0', textAlign: 'center' }}>
             <div style=${{ fontSize: 19, fontWeight: 600, letterSpacing: '-0.3px', textTransform: 'lowercase', color: '#fff' }}>${all.length ? 'nothing matches' : 'nothing saved yet'}</div>
@@ -613,7 +592,7 @@
     `;
   }
 
-  function TripScreen({ state, patch, mapWrapRef, mapSize, onMapPointerDown, onMapWheel, onMapClick }) {
+  function TripScreen({ state, patch, mapContainerRef, overlayNodes, onZoomIn, onZoomOut, onRecenter }) {
     const trip = state.trips.find(t => t.id === state.tripId) || state.trips[0];
     const all = allSpotsForTrip(state);
     const counts = {};
@@ -653,9 +632,8 @@
             })}
           </div>
         </div>
-        ${state.view === 'map'
-          ? MapView({ state, patch, mapSize, mapWrapRef, onMapPointerDown, onMapWheel, onMapClick })
-          : ListView({ state, patch, all })}
+        ${MapView({ state, patch, mapContainerRef, overlayNodes, onZoomIn, onZoomOut, onRecenter, visible: state.view === 'map' })}
+        ${ListView({ state, patch, all, visible: state.view === 'list' })}
       </div>
     `;
   }
@@ -1072,7 +1050,7 @@
       const nm = (nt.name || 'new trip').trim().toLowerCase();
       const id = 'trip-' + Date.now() + '-' + state.trips.length;
       const fills = ['#ffadd2', '#aed900', '#7db4ff', '#f28500'];
-      const trip = { id, name: nm, legs: nt.legs, fill: fills[state.trips.length % 4], geo: false, location: nt.location };
+      const trip = { id, name: nm, legs: nt.legs, fill: fills[state.trips.length % 4], location: nt.location };
       const draftStays = nt.stays;
       patch({
         trips: state.trips.concat([trip]),
@@ -1268,19 +1246,6 @@
       return () => clearTimeout(t);
     }, [state.trips, state.spots, state.stays, state.activeStay, syncReady]);
 
-    const mapWrapRef = useRef(null);
-    const [mapSize, setMapSize] = useState({ w: 0, h: 0 });
-    useEffect(() => {
-      const el = mapWrapRef.current;
-      if (!el) return;
-      const ro = new ResizeObserver((entries) => {
-        const cr = entries[0].contentRect;
-        setMapSize({ w: cr.width, h: cr.height });
-      });
-      ro.observe(el);
-      return () => ro.disconnect();
-    }, [state.screen, state.view]);
-
     // Selecting a spot (from a map pin or a sheet card) scrolls its matching
     // card in the pull-up sheet into view, so the two stay in sync either way.
     useEffect(() => {
@@ -1289,46 +1254,113 @@
       if (el) el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
     }, [state.sel]);
 
+    // ---------- google map instance ----------
+    // The map container is a real DOM node handed to google.maps.Map, so it's driven
+    // imperatively (refs) rather than through React state. A callback ref (rather than a
+    // plain useRef) lets us notice when the container itself is unmounted/remounted (e.g.
+    // leaving and re-entering a trip) and (re)create the map instance to match.
+    const mapNodeRef = useRef(null);
+    const mapRef = useRef(null);
+    const overlayInstancesRef = useRef({});
     const fitKeyRef = useRef(null);
+    const [mapReady, setMapReady] = useState(false);
+    const [overlayNodes, setOverlayNodes] = useState({});
+
+    const mapContainerRef = useCallback((node) => {
+      mapNodeRef.current = node;
+      if (!node) { mapRef.current = null; setMapReady(false); return; }
+      window.PinsGoogleMaps.load().then((maps) => {
+        if (mapNodeRef.current !== node) return;
+        const map = new maps.Map(node, {
+          center: { lat: 20, lng: 0 }, zoom: 2,
+          styles: window.PinsGoogleMaps.DARK_STYLE,
+          disableDefaultUI: true, gestureHandling: 'greedy', clickableIcons: false, backgroundColor: '#131313'
+        });
+        map.addListener('click', () => patch({ sel: null }));
+        mapRef.current = map;
+        overlayInstancesRef.current = {};
+        setOverlayNodes({});
+        fitKeyRef.current = null;
+        setMapReady(true);
+      }).catch((err) => console.warn('pins: could not load google maps', err));
+      // eslint-disable-next-line
+    }, []);
+
+    // The map doesn't auto-detect its container resizing (sidebar/orientation changes).
     useEffect(() => {
-      if (state.screen !== 'trip' || state.view !== 'map') return;
-      if (mapSize.w < 10) return;
+      const node = mapNodeRef.current;
+      if (!mapReady || !node || !window.google) return;
+      const ro = new ResizeObserver(() => {
+        if (!mapRef.current) return;
+        const c = mapRef.current.getCenter();
+        window.google.maps.event.trigger(mapRef.current, 'resize');
+        if (c) mapRef.current.setCenter(c);
+      });
+      ro.observe(node);
+      return () => ro.disconnect();
+    }, [mapReady]);
+
+    // Fit the map to the trip once per trip (not on every render/edit) so users can
+    // freely pan/zoom afterwards without it snapping back.
+    useEffect(() => {
+      if (!mapReady || state.screen !== 'trip' || state.view !== 'map') return;
       if (fitKeyRef.current === state.tripId) return;
       fitKeyRef.current = state.tripId;
-      patch(prev => fitToSpots(prev, mapSize));
+      fitMapToTrip(mapRef.current, state);
       // eslint-disable-next-line
-    }, [state.screen, state.view, state.tripId, mapSize.w, mapSize.h]);
+    }, [mapReady, state.screen, state.view, state.tripId]);
 
-    const draggedRef = useRef(false);
-    const onMapPointerDown = (e) => {
-      if (e.button === 1 || e.button === 2) return;
-      const sx = e.clientX, sy = e.clientY;
-      const tx0 = state.tx, ty0 = state.ty;
-      let moved = false;
-      const el = e.currentTarget;
-      const move = (ev) => {
-        const dx = ev.clientX - sx, dy = ev.clientY - sy;
-        if (Math.abs(dx) + Math.abs(dy) > 4) { moved = true; el.style.cursor = 'grabbing'; }
-        if (moved) patch({ tx: tx0 + dx, ty: ty0 + dy });
+    // Pan to whatever spot gets selected (from a map pin or the bottom sheet).
+    const panKeyRef = useRef(null);
+    useEffect(() => {
+      if (!mapReady) return;
+      if (!state.sel) { panKeyRef.current = null; return; }
+      if (panKeyRef.current === state.sel) return;
+      panKeyRef.current = state.sel;
+      const s = state.spots.find(sp => sp.id === state.sel);
+      if (s && s.la != null && s.ln != null) mapRef.current.panTo({ lat: s.la, lng: s.ln });
+    }, [mapReady, state.sel]);
+
+    // Keep one persistent HTML-overlay node per spot/stay so React can portal their
+    // (declarative) marker JSX into a DOM node that google.maps.OverlayView repositions.
+    useEffect(() => {
+      if (!mapReady) return;
+      const maps = window.google.maps;
+      const map = mapRef.current;
+      const spots = allSpotsForTrip(state).filter(s => s.la != null && s.ln != null);
+      const stays = stayList(state).filter(s => s.la != null && s.ln != null);
+      const wanted = new Set([...spots.map(s => 'spot:' + s.id), ...stays.map(s => 'stay:' + s.id)]);
+      const inst = overlayInstancesRef.current;
+      let changed = false;
+      Object.keys(inst).forEach((key) => {
+        if (!wanted.has(key)) { inst[key].overlay.setMap(null); delete inst[key]; changed = true; }
+      });
+      const addOverlay = (key, la, ln) => {
+        if (inst[key]) return;
+        const node = document.createElement('div');
+        const overlay = window.PinsGoogleMaps.makeOverlay(maps, map, new maps.LatLng(la, ln), node);
+        inst[key] = { overlay, node };
+        changed = true;
       };
-      const up = () => {
-        el.style.cursor = 'grab';
-        window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', up);
-        draggedRef.current = moved;
-      };
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', up);
-    };
-    const onMapWheel = (e) => { e.preventDefault(); patch(prev => zoomBy(prev, mapSize, e.deltaY < 0 ? 1.12 : 0.9)); };
-    const onMapClick = () => { if (!draggedRef.current) patch({ sel: null }); };
+      spots.forEach(s => addOverlay('spot:' + s.id, s.la, s.ln));
+      stays.forEach(s => addOverlay('stay:' + s.id, s.la, s.ln));
+      if (changed) {
+        const next = {};
+        Object.keys(inst).forEach((key) => { next[key] = inst[key].node; });
+        setOverlayNodes(next);
+      }
+    }, [mapReady, state.tripId, state.spots, state.stays]);
+
+    const onZoomIn = () => mapRef.current && mapRef.current.setZoom((mapRef.current.getZoom() || 2) + 1);
+    const onZoomOut = () => mapRef.current && mapRef.current.setZoom(Math.max(1, (mapRef.current.getZoom() || 2) - 1));
+    const onRecenter = () => fitMapToTrip(mapRef.current, state);
 
     return html`
       <div className="app-shell">
         ${boot ? BootScreen({ boot, onSkip: skipBoot }) : null}
         ${state.screen === 'trips'
           ? TripsScreen({ state, patch })
-          : TripScreen({ state, patch, mapWrapRef, mapSize, onMapPointerDown, onMapWheel, onMapClick })}
+          : TripScreen({ state, patch, mapContainerRef, overlayNodes, onZoomIn, onZoomOut, onRecenter })}
         ${state.detail ? SpotDetailScreen({ state, patch, bump }) : null}
         ${state.addOpen ? AddSpotSheet({ state, patch, bump }) : null}
         ${state.stayOpen ? StaySheet({ state, patch }) : null}
