@@ -780,14 +780,16 @@
         spots: state.spots.concat([s]), addOpen: false, sel: s.id, detail: s.id,
         f: { name: '', cat: f.cat, addr: '', url: '', note: '', googleResults: [], googleSearching: false, googlePlace: null }
       });
-      if (gp && gp.photoName) {
-        window.PinsPlaces.fetchPhotoBlob(gp.photoName, 800).then(async (blob) => {
-          if (!blob) return;
-          try {
-            const dataUrl = await S.compressImage(blob);
-            S.savePhoto(id, 0, dataUrl);
-            bump();
-          } catch (err) { console.warn('pins: could not save google photo', err); }
+      if (gp && gp.photoNames && gp.photoNames.length) {
+        gp.photoNames.forEach((photoName, i) => {
+          window.PinsPlaces.fetchPhotoBlob(photoName, 800).then(async (blob) => {
+            if (!blob) return;
+            try {
+              const dataUrl = await S.compressImage(blob);
+              S.savePhoto(id, i, dataUrl);
+              bump();
+            } catch (err) { console.warn('pins: could not save google photo', err); }
+          });
         });
       }
     };
