@@ -41,6 +41,11 @@
   function newLeg() { return { id: 'leg-' + Date.now(), start: '', end: '' }; }
   function emptyStayDraft() { return { name: '', location: null, locResults: [], locSearching: false, start: '', end: '' }; }
 
+  // Spots used to hold one source link in `u`; now they can hold several in `links`.
+  function migrateSpotLinks(spots) {
+    return spots.map(s => Array.isArray(s.links) ? s : { ...s, links: s.u ? [s.u] : [] });
+  }
+
   // ---------- state ----------
 
   // Trips used to have one start/end pair; now a trip can have several date-range
@@ -75,15 +80,15 @@
     return {
       screen: 'trips', tripId: 'paris', view: 'map', query: '', off: {},
       sel: null, selStay: null, detail: null, expanded: false, addOpen: false, newTripOpen: false, stayOpen: false,
-      confirmDeleteTripId: null, editTripId: null,
+      confirmDeleteTripId: null, editTripId: null, linkDraft: '',
       stayEditId: null, stayEditStart: '', stayEditEnd: '',
       trips: migrateTripLegs((saved && saved.trips) || D.seedTrips),
       // Hotel spots (the old "pinned/saved hotels" pick-list) were retired in favor of
       // Google-Places-backed stays entered directly — drop any that survive in old saved data.
-      spots: ((saved && saved.spots) || D.seedSpots).filter(s => s.c !== 'hotel'),
+      spots: migrateSpotLinks(((saved && saved.spots) || D.seedSpots).filter(s => s.c !== 'hotel')),
       stays, activeStay,
       sf: { name: '', start: '', end: '', googleResults: [], googleSearching: false, googlePlace: null },
-      f: { name: '', cat: 'restaurant', addr: '', url: '', note: '', googleResults: [], googleSearching: false, googlePlace: null },
+      f: { name: '', cat: 'restaurant', addr: '', urls: [''], note: '', googleResults: [], googleSearching: false, googlePlace: null },
       nt: { name: '', legs: [newLeg()], location: null, locResults: [], locSearching: false, stays: [], stayDraft: emptyStayDraft() },
       et: { name: '', legs: [newLeg()], location: null, locResults: [], locSearching: false }
     };
@@ -118,6 +123,8 @@
     const c = D.cats[s.c];
     const stay = currentStay(state);
     const km = distanceTo(state, s);
+    const links = s.links || [];
+    const src = links.length ? G.host(links[0]) + (links.length > 1 ? ' +' + (links.length - 1) : '') : 'no link';
     return {
       id: s.id, name: s.n, note: s.no || 'no note yet', arr: G.arrFromLatLng(s.la, s.ln), fill: c.fill, ink: c.ink,
       cat: c.label,
@@ -125,7 +132,7 @@
       bg: s.visited ? '#1a1a1a' : '#131313',
       border: s.id === state.sel ? '#ffffff' : '#2a2a2a',
       tags: (s.t || []).slice(0, 3),
-      src: G.host(s.u) || 'no link', srcInk: s.u ? '#ffffff' : '#737373'
+      src, srcInk: links.length ? '#ffffff' : '#737373'
     };
   }
 
@@ -414,7 +421,7 @@
       return html`
         <div onClick=${(e) => {
           e.stopPropagation();
-          if (state.sel === s.id) patch({ detail: s.id, expanded: false });
+          if (state.sel === s.id) patch({ detail: s.id, expanded: false, linkDraft: '' });
           else patch({ sel: s.id, expanded: false });
         }}
           style=${{ position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)', zIndex: selq ? 4 : 2, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
@@ -507,7 +514,7 @@
     // Tapping a spot that isn't selected just highlights + centers it on the map;
     // tapping it again (already selected) opens the full detail screen.
     const selectOrOpen = (s) => () => {
-      if (state.sel === s.id) { patch({ detail: s.id }); return; }
+      if (state.sel === s.id) { patch({ detail: s.id, linkDraft: '' }); return; }
       patch({ sel: s.id });
     };
 
@@ -586,7 +593,7 @@
             </div>
             <div style=${{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               ${g.items.map(s => { const d = decorateSpot(s, state); return html`
-                <button type="button" key=${s.id} className="list-row-hover" onClick=${() => patch({ detail: s.id, sel: s.id })}
+                <button type="button" key=${s.id} className="list-row-hover" onClick=${() => patch({ detail: s.id, sel: s.id, linkDraft: '' })}
                   style=${{ display: 'flex', width: '100%', textAlign: 'left', gap: 12, background: d.bg, border: '1px solid #2a2a2a', borderRadius: 18, padding: 13 }}>
                   <div style=${{ flex: 1, minWidth: 0 }}>
                     <div style=${{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
@@ -663,11 +670,19 @@
     const arr = G.arrFromLatLng(d.la, d.ln);
     const stay = currentStay(state);
     const km = distanceTo(state, d);
+    const links = d.links || [];
 
-    const close = () => patch({ detail: null });
+    const close = () => patch({ detail: null, linkDraft: '' });
     const toggleVisited = () => patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, visited: !s.visited } : s) });
     const setNote = (e) => { const v = e.target.value; patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, no: v } : s) }); };
     const removeSpot = () => patch({ spots: state.spots.filter(s => s.id !== d.id), detail: null, sel: null });
+    const setLinkDraft = (e) => patch({ linkDraft: e.target.value });
+    const addLink = () => {
+      const v = state.linkDraft.trim();
+      if (!v) return;
+      patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, links: [...(s.links || []), v] } : s), linkDraft: '' });
+    };
+    const removeLink = (i) => () => patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, links: (s.links || []).filter((_, idx) => idx !== i) } : s) });
 
     return html`
       <div style=${{ position: 'absolute', inset: 0, zIndex: 20, background: '#131313', display: 'flex', flexDirection: 'column', animation: 'upSheet 320ms cubic-bezier(0.93,0,0.07,1)' }}>
@@ -706,14 +721,25 @@
                 <div style=${{ fontSize: 12.5, color: '#b3b3b3' }}>${d.p || 'add a price'}</div>
               </div>
             </div>
-            ${d.u ? html`
-              <div style=${{ borderRadius: 20, padding: 14, background: c.soft, marginBottom: 14 }}>
-                <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9 }}>
-                  <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#fff' }}>saved from ${G.host(d.u)}</div>
+            <div style=${{ borderRadius: 20, padding: 14, background: c.soft, marginBottom: 14 }}>
+              <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#fff', marginBottom: 9 }}>saved links</div>
+              ${links.length ? html`
+                <div style=${{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                  ${links.map((link, i) => html`
+                    <div key=${i} style=${{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <a href=${link} target="_blank" rel="noreferrer" style=${{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', color: '#131313', borderRadius: 999, padding: '9px 15px', fontSize: 13.5, fontWeight: 500, textTransform: 'lowercase' }}>view on ${G.host(link)} ${ExternalLinkIcon()}</a>
+                      <button type="button" onClick=${removeLink(i)} aria-label="remove link" style=${{ flex: 'none', fontFamily: "'Character Mono',monospace", fontSize: 13, color: '#9e9e9e', padding: '4px 6px' }}>×</button>
+                    </div>
+                  `)}
                 </div>
-                <a href=${d.u} target="_blank" rel="noreferrer" style=${{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', color: '#131313', borderRadius: 999, padding: '9px 15px', fontSize: 13.5, fontWeight: 500, textTransform: 'lowercase' }}>open original ${ExternalLinkIcon()}</a>
+              ` : html`<div style=${{ fontSize: 13, color: '#b3b3b3', marginBottom: 10 }}>no links saved yet</div>`}
+              <div style=${{ display: 'flex', gap: 8 }}>
+                <input value=${state.linkDraft} onChange=${setLinkDraft} placeholder="paste another tiktok or instagram url"
+                  style=${{ flex: 1, minWidth: 0, border: '1px solid #333333', borderRadius: 14, padding: '9px 12px', fontSize: 13.5, background: 'transparent' }}/>
+                <button type="button" onClick=${addLink} disabled=${!state.linkDraft.trim()}
+                  style=${{ flex: 'none', fontFamily: "'Character Mono',monospace", fontSize: 11, letterSpacing: '0.05em', textTransform: 'uppercase', color: state.linkDraft.trim() ? '#fff' : '#737373', border: '1px solid #333333', borderRadius: 999, padding: '0 14px' }}>add</button>
               </div>
-            ` : null}
+            </div>
             <div style=${{ marginBottom: 14 }}>
               <div style=${MONO_HEADER}>notes</div>
               <textarea value=${d.no || ''} onChange=${setNote} placeholder="what do you want to order? who told you about it?"
@@ -736,6 +762,9 @@
     const close = () => patch({ addOpen: false });
     const setField = (k) => (e) => patch({ f: { ...state.f, [k]: e.target.value } });
     const pickCat = (k) => () => patch({ f: { ...state.f, cat: k } });
+    const setUrlAt = (i) => (e) => { const urls = f.urls.slice(); urls[i] = e.target.value; patch({ f: { ...state.f, urls } }); };
+    const addUrlField = () => patch({ f: { ...state.f, urls: [...f.urls, ''] } });
+    const removeUrlField = (i) => () => patch({ f: { ...state.f, urls: f.urls.filter((_, idx) => idx !== i) } });
 
     const doGoogleSearch = async () => {
       const q = (f.name + ' ' + (f.addr || '')).trim();
@@ -773,12 +802,12 @@
       const s = {
         id, idx: state.spots.length, n: name.toLowerCase(),
         c: f.cat, addr: f.addr.trim() || undefined,
-        la, ln, no: f.note, u: f.url || undefined, t: [], visited: false, trip: state.tripId,
+        la, ln, no: f.note, links: f.urls.map(u => u.trim()).filter(Boolean), t: [], visited: false, trip: state.tripId,
         h: (gp && gp.hours) || undefined, p: (gp && gp.price) || undefined
       };
       patch({
         spots: state.spots.concat([s]), addOpen: false, sel: s.id, detail: s.id,
-        f: { name: '', cat: f.cat, addr: '', url: '', note: '', googleResults: [], googleSearching: false, googlePlace: null }
+        f: { name: '', cat: f.cat, addr: '', urls: [''], note: '', googleResults: [], googleSearching: false, googlePlace: null }
       });
       if (gp && gp.photoNames && gp.photoNames.length) {
         gp.photoNames.forEach((photoName, i) => {
@@ -847,9 +876,18 @@
             ` : html`
               <p style=${{ fontSize: 13, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 10px' }}>look it up on google above and the pin — and its arrondissement — place themselves.</p>
             `}
-            <div style=${MONO_HEADER}>source link</div>
-            <input value=${f.url} onChange=${setField('url')} placeholder="paste the tiktok or instagram url"
-              style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 15, marginBottom: 14 }}/>
+            <div style=${MONO_HEADER}>source links</div>
+            ${f.urls.map((u, i) => html`
+              <div key=${i} style=${{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <input value=${u} onChange=${setUrlAt(i)} placeholder="paste the tiktok or instagram url"
+                  style=${{ flex: 1, minWidth: 0, border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 15 }}/>
+                ${f.urls.length > 1 ? html`
+                  <button type="button" onClick=${removeUrlField(i)} aria-label="remove link" style=${{ flex: 'none', fontFamily: "'Character Mono',monospace", fontSize: 15, color: '#9e9e9e', padding: '0 6px' }}>×</button>
+                ` : null}
+              </div>
+            `)}
+            <button type="button" onClick=${addUrlField}
+              style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9e9e9e', marginBottom: 14 }}>+ add another link</button>
             <div style=${MONO_HEADER}>why you saved it</div>
             <textarea value=${f.note} onChange=${setField('note')} placeholder="the thing you'll forget otherwise"
               style=${{ width: '100%', minHeight: 70, resize: 'vertical', border: '1px solid #333333', borderRadius: 16, padding: '11px 13px', fontSize: 15, lineHeight: 1.45, marginBottom: 16 }}/>
@@ -1208,7 +1246,7 @@
             trips: remote.trips ? migrateTripLegs(remote.trips) : state.trips,
             // Retired hotel-category spots (the old pinned/saved-hotels list) can still be
             // sitting in older synced data — strip them here too, not just from local storage.
-            spots: remote.spots ? remote.spots.filter(s => s.c !== 'hotel') : state.spots,
+            spots: remote.spots ? migrateSpotLinks(remote.spots.filter(s => s.c !== 'hotel')) : state.spots,
             stays: remote.stays || state.stays,
             activeStay: remote.activeStay || state.activeStay
           });
