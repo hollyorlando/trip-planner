@@ -8,11 +8,9 @@ window.PinsGoogleMaps = (function () {
     if (loadPromise) return loadPromise;
     loadPromise = new Promise((resolve, reject) => {
       if (window.google && window.google.maps) { resolve(window.google.maps); return; }
-      const key = (window.PINS_PLACES_CONFIG || {}).apiKey;
-      if (!key) { reject(new Error('missing google maps api key')); return; }
       window.__pinsGmapsReady = () => resolve(window.google.maps);
       const s = document.createElement('script');
-      s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(key) + '&callback=__pinsGmapsReady&loading=async';
+      s.src = '/api/maps-script?callback=__pinsGmapsReady';
       s.async = true;
       s.onerror = () => reject(new Error('failed to load google maps'));
       document.head.appendChild(s);
