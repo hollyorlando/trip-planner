@@ -41,9 +41,13 @@
   function newLeg() { return { id: 'leg-' + Date.now(), start: '', end: '' }; }
   function emptyStayDraft() { return { name: '', location: null, locResults: [], locSearching: false, start: '', end: '' }; }
 
-  // Spots used to hold one source link in `u`; now they can hold several in `links`.
+  // Spots used to hold one source link in `u`, then several bare URL strings in
+  // `links`; now each link is a {url, title} object so it can carry its own label.
   function migrateSpotLinks(spots) {
-    return spots.map(s => Array.isArray(s.links) ? s : { ...s, links: s.u ? [s.u] : [] });
+    return spots.map(s => {
+      const raw = Array.isArray(s.links) ? s.links : (s.u ? [s.u] : []);
+      return { ...s, links: raw.map(l => typeof l === 'string' ? { url: l, title: null } : l) };
+    });
   }
 
   // ---------- state ----------
@@ -80,7 +84,7 @@
     return {
       screen: 'trips', tripId: 'paris', view: 'map', query: '', off: {},
       sel: null, selStay: null, detail: null, expanded: false, addOpen: false, newTripOpen: false, stayOpen: false,
-      confirmDeleteTripId: null, editTripId: null, linkDraft: '',
+      confirmDeleteTripId: null, editTripId: null, linkDraft: '', linkTitleDraft: '', addingLink: false,
       stayEditId: null, stayEditStart: '', stayEditEnd: '',
       trips: migrateTripLegs((saved && saved.trips) || D.seedTrips),
       // Hotel spots (the old "pinned/saved hotels" pick-list) were retired in favor of
@@ -124,7 +128,7 @@
     const stay = currentStay(state);
     const km = distanceTo(state, s);
     const links = s.links || [];
-    const src = links.length ? G.host(links[0]) + (links.length > 1 ? ' +' + (links.length - 1) : '') : 'no link';
+    const src = links.length ? G.host(links[0].url) + (links.length > 1 ? ' +' + (links.length - 1) : '') : 'no link';
     return {
       id: s.id, name: s.n, note: s.no || 'no note yet', arr: G.arrFromLatLng(s.la, s.ln), fill: c.fill, ink: c.ink,
       cat: c.label,
@@ -181,11 +185,6 @@
       <path d="M12 1.5v3.2M12 19.3v3.2M22.5 12h-3.2M4.7 12H1.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
     </svg>`;
   }
-  function ExternalLinkIcon() {
-    return html`<svg width="16" height="16" viewBox="0 0 20 20" fill="none" style=${{ flex: 'none' }}>
-      <path d="M4.16667 10H15.8333M15.8333 10L10 4.16667M15.8333 10L10 15.8333" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>`;
-  }
   function TrashIcon({ size = 15, color = '#9e9e9e' }) {
     return html`<svg width=${size} height=${size} viewBox="0 0 24 24" fill="none" style=${{ flex: 'none', color }}>
       <path d="M4 7h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
@@ -198,6 +197,11 @@
     return html`<svg width=${size} height=${size} viewBox="0 0 24 24" fill="none" style=${{ flex: 'none', color }}>
       <path d="M14.5 4.5l5 5L8 21H3v-5z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
       <path d="M13 6l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+    </svg>`;
+  }
+  function PlusIcon({ size = 14, color = 'currentColor' }) {
+    return html`<svg width=${size} height=${size} viewBox="0 0 20 20" fill="none" style=${{ flex: 'none', color }}>
+      <path d="M10 4.16667V15.8333M4.16667 10H15.8333" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
     </svg>`;
   }
 
@@ -421,7 +425,7 @@
       return html`
         <div onClick=${(e) => {
           e.stopPropagation();
-          if (state.sel === s.id) patch({ detail: s.id, expanded: false, linkDraft: '' });
+          if (state.sel === s.id) patch({ detail: s.id, expanded: false, linkDraft: '', linkTitleDraft: '', addingLink: false });
           else patch({ sel: s.id, expanded: false });
         }}
           style=${{ position: 'absolute', left: 0, top: 0, transform: 'translate(-50%,-50%)', zIndex: selq ? 4 : 2, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
@@ -514,7 +518,7 @@
     // Tapping a spot that isn't selected just highlights + centers it on the map;
     // tapping it again (already selected) opens the full detail screen.
     const selectOrOpen = (s) => () => {
-      if (state.sel === s.id) { patch({ detail: s.id, linkDraft: '' }); return; }
+      if (state.sel === s.id) { patch({ detail: s.id, linkDraft: '', linkTitleDraft: '', addingLink: false }); return; }
       patch({ sel: s.id });
     };
 
@@ -593,7 +597,7 @@
             </div>
             <div style=${{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               ${g.items.map(s => { const d = decorateSpot(s, state); return html`
-                <button type="button" key=${s.id} className="list-row-hover" onClick=${() => patch({ detail: s.id, sel: s.id, linkDraft: '' })}
+                <button type="button" key=${s.id} className="list-row-hover" onClick=${() => patch({ detail: s.id, sel: s.id, linkDraft: '', linkTitleDraft: '', addingLink: false })}
                   style=${{ display: 'flex', width: '100%', textAlign: 'left', gap: 12, background: d.bg, border: '1px solid #2a2a2a', borderRadius: 18, padding: 13 }}>
                   <div style=${{ flex: 1, minWidth: 0 }}>
                     <div style=${{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
@@ -672,16 +676,22 @@
     const km = distanceTo(state, d);
     const links = d.links || [];
 
-    const close = () => patch({ detail: null, linkDraft: '' });
+    const close = () => patch({ detail: null, linkDraft: '', linkTitleDraft: '', addingLink: false });
     const toggleVisited = () => patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, visited: !s.visited } : s) });
     const setNote = (e) => { const v = e.target.value; patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, no: v } : s) }); };
     const removeSpot = () => patch({ spots: state.spots.filter(s => s.id !== d.id), detail: null, sel: null });
     const setLinkDraft = (e) => patch({ linkDraft: e.target.value });
+    const setLinkTitleDraft = (e) => patch({ linkTitleDraft: e.target.value });
+    const openAddLink = () => patch({ addingLink: true });
+    const cancelAddLink = () => patch({ addingLink: false, linkDraft: '', linkTitleDraft: '' });
     const addLink = () => {
-      const v = state.linkDraft.trim();
-      if (!v) return;
-      patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, links: [...(s.links || []), v] } : s), linkDraft: '' });
+      const raw = state.linkDraft.trim();
+      if (!raw) return;
+      const url = /^https?:\/\//.test(raw) ? raw : 'https://' + raw;
+      const title = state.linkTitleDraft.trim() || G.host(url);
+      patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, links: [...(s.links || []), { url, title }] } : s), linkDraft: '', linkTitleDraft: '', addingLink: false });
     };
+    const onLinkUrlKey = (e) => { if (e.key === 'Enter') addLink(); };
     const removeLink = (i) => () => patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, links: (s.links || []).filter((_, idx) => idx !== i) } : s) });
 
     return html`
@@ -716,29 +726,71 @@
                 <div style=${{ fontSize: 12.5, color: '#b3b3b3' }}>${!stay ? 'tap to set one' : Math.max(2, Math.round(km * 13)) + ' min walk'}</div>
               </div>
               <div style=${{ background: '#1e1e1e', borderRadius: 16, padding: '12px 13px' }}>
-                <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 9.5, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#9e9e9e', marginBottom: 5 }}>hours · price</div>
-                <div style=${{ fontSize: 13, fontWeight: 500, color: d.h ? '#fff' : '#737373', lineHeight: 1.4, whiteSpace: 'pre-line' }}>${d.h || 'not added yet'}</div>
-                <div style=${{ fontSize: 12.5, color: '#b3b3b3' }}>${d.p || 'add a price'}</div>
+                <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 9.5, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#9e9e9e', marginBottom: 5 }}>price · rating</div>
+                <div style=${{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.3px', color: d.p ? '#fff' : '#737373' }}>${d.p || 'not added yet'}</div>
               </div>
             </div>
-            <div style=${{ borderRadius: 20, padding: 14, background: c.soft, marginBottom: 14 }}>
-              <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#fff', marginBottom: 9 }}>saved links</div>
+            ${d.h ? html`
+              <div style=${{ background: '#1e1e1e', borderRadius: 16, padding: '13px 14px', marginBottom: 14 }}>
+                <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 9.5, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#9e9e9e', marginBottom: 9 }}>hours</div>
+                <div style=${{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  ${d.h.split('\n').map((line, i) => {
+                    const idx = line.indexOf(':');
+                    const day = idx > -1 ? line.slice(0, idx) : line;
+                    const time = idx > -1 ? line.slice(idx + 1).trim() : '';
+                    return html`
+                      <div key=${i} style=${{ display: 'flex', justifyContent: 'space-between', gap: 14, fontSize: 13, lineHeight: 1.3 }}>
+                        <span style=${{ color: '#9e9e9e', flex: 'none' }}>${day}</span>
+                        <span style=${{ color: '#fff', textAlign: 'right' }}>${time}</span>
+                      </div>
+                    `;
+                  })}
+                </div>
+              </div>
+            ` : null}
+            <div style=${{ marginBottom: 14 }}>
+              <div style=${{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 9 }}>
+                <div style=${{ ...MONO_HEADER, marginBottom: 0 }}>saved links</div>
+                <div style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, color: '#737373' }}>${links.length ? links.length + (links.length === 1 ? ' link' : ' links') : 'none saved'}</div>
+              </div>
               ${links.length ? html`
-                <div style=${{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                <div style=${{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
                   ${links.map((link, i) => html`
-                    <div key=${i} style=${{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      <a href=${link} target="_blank" rel="noreferrer" style=${{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', color: '#131313', borderRadius: 999, padding: '9px 15px', fontSize: 13.5, fontWeight: 500, textTransform: 'lowercase' }}>view on ${G.host(link)} ${ExternalLinkIcon()}</a>
-                      <button type="button" onClick=${removeLink(i)} aria-label="remove link" style=${{ flex: 'none', fontFamily: "'Character Mono',monospace", fontSize: 13, color: '#9e9e9e', padding: '4px 6px' }}>×</button>
+                    <div key=${i} className="list-row-hover" style=${{ display: 'flex', alignItems: 'center', gap: 10, background: '#1e1e1e', border: '1px solid #2a2a2a', borderRadius: 16, padding: '10px 10px 10px 12px' }}>
+                      <span style=${{ flex: 'none', width: 32, height: 32, borderRadius: 9, background: '#2a2a2a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Character Mono',monospace", fontSize: 9.5, letterSpacing: '0.02em', color: '#cfcfca' }}>${G.badge(link.url)}</span>
+                      <span style=${{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <span style=${{ fontSize: 13.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${link.title || G.host(link.url)}</span>
+                        <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, color: '#737373', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${G.host(link.url)}</span>
+                      </span>
+                      <a href=${link.url} target="_blank" rel="noreferrer" style=${{ flex: 'none', fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#131313', background: '#fff', borderRadius: 999, padding: '8px 12px' }}>view ↗</a>
+                      <button type="button" onClick=${removeLink(i)} aria-label="remove link" className="icon-btn" style=${{ flex: 'none', width: 26, height: 26, borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#737373' }}>×</button>
                     </div>
                   `)}
                 </div>
-              ` : html`<div style=${{ fontSize: 13, color: '#b3b3b3', marginBottom: 10 }}>no links saved yet</div>`}
-              <div style=${{ display: 'flex', gap: 8 }}>
-                <input value=${state.linkDraft} onChange=${setLinkDraft} placeholder="paste another tiktok or instagram url"
-                  style=${{ flex: 1, minWidth: 0, border: '1px solid #333333', borderRadius: 14, padding: '9px 12px', fontSize: 13.5, background: 'transparent' }}/>
-                <button type="button" onClick=${addLink} disabled=${!state.linkDraft.trim()}
-                  style=${{ flex: 'none', fontFamily: "'Character Mono',monospace", fontSize: 11, letterSpacing: '0.05em', textTransform: 'uppercase', color: state.linkDraft.trim() ? '#fff' : '#737373', border: '1px solid #333333', borderRadius: 999, padding: '0 14px' }}>add</button>
-              </div>
+              ` : html`
+                <div style=${{ border: '1px dashed #2a2a2a', borderRadius: 16, padding: '14px 16px', marginBottom: 10 }}>
+                  <span style=${{ fontSize: 12.5, lineHeight: 1.45, color: '#9e9e9e' }}>no links yet — save the post, review, or menu that made you pin this place</span>
+                </div>
+              `}
+              ${state.addingLink ? html`
+                <div style=${{ display: 'flex', flexDirection: 'column', gap: 8, background: '#1e1e1e', border: '1px solid #2a2a2a', borderRadius: 16, padding: 12 }}>
+                  <input value=${state.linkTitleDraft} onChange=${setLinkTitleDraft} placeholder="label (e.g. tiktok walkthrough)" autofocus
+                    style=${{ border: '1px solid #333333', borderRadius: 12, padding: '9px 11px', fontSize: 13.5, background: 'transparent', color: '#fff' }}/>
+                  <input value=${state.linkDraft} onChange=${setLinkDraft} onKeyDown=${onLinkUrlKey} placeholder="https://…"
+                    style=${{ border: '1px solid #333333', borderRadius: 12, padding: '9px 11px', fontSize: 13, fontFamily: "'Character Mono',monospace", background: 'transparent', color: '#fff' }}/>
+                  <div style=${{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button type="button" onClick=${cancelAddLink}
+                      style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9e9e9e', border: '1px solid #333333', borderRadius: 999, padding: '8px 13px' }}>cancel</button>
+                    <button type="button" onClick=${addLink} disabled=${!state.linkDraft.trim()}
+                      style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.05em', textTransform: 'uppercase', color: state.linkDraft.trim() ? '#131313' : '#737373', background: state.linkDraft.trim() ? '#fff' : 'transparent', border: '1px solid #333333', borderRadius: 999, padding: '8px 14px' }}>save link</button>
+                  </div>
+                </div>
+              ` : html`
+                <button type="button" onClick=${openAddLink} style=${{ display: 'inline-flex', alignItems: 'center', gap: 8, color: '#fff', fontSize: 13 }}>
+                  <span style=${{ width: 20, height: 20, borderRadius: 6, border: '1px solid #333333', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>${PlusIcon({ size: 11 })}</span>
+                  <span style=${{ textDecoration: 'underline', textUnderlineOffset: '3px' }}>add link</span>
+                </button>
+              `}
             </div>
             <div style=${{ marginBottom: 14 }}>
               <div style=${MONO_HEADER}>notes</div>
@@ -802,7 +854,7 @@
       const s = {
         id, idx: state.spots.length, n: name.toLowerCase(),
         c: f.cat, addr: f.addr.trim() || undefined,
-        la, ln, no: f.note, links: f.urls.map(u => u.trim()).filter(Boolean), t: [], visited: false, trip: state.tripId,
+        la, ln, no: f.note, links: f.urls.map(u => u.trim()).filter(Boolean).map(url => ({ url, title: null })), t: [], visited: false, trip: state.tripId,
         h: (gp && gp.hours) || undefined, p: (gp && gp.price) || undefined
       };
       patch({
