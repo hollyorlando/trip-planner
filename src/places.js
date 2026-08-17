@@ -1,16 +1,12 @@
-// Google Places API (New) lookups: search by name/address, pull details + a photo.
-// Called directly from the browser (Places API New supports CORS) — no backend needed.
+// Google Places API (New) lookups, proxied through /api/places/* (see api/places/*.js)
+// so the real API key stays server-side and never ships to the browser.
 // Costs real money past Google's free monthly allowance, so this is only ever
 // triggered by an explicit button tap, never automatically while typing.
 window.PinsPlaces = (function () {
-  const cfg = window.PINS_PLACES_CONFIG || {};
-  const configured = !!(cfg.apiKey && cfg.apiKey !== 'YOUR_GOOGLE_PLACES_API_KEY');
-  const BASE = 'https://places.googleapis.com/v1';
-
-  function isConfigured() { return configured; }
+  function isConfigured() { return true; }
 
   async function searchPlaces(query, opts) {
-    if (!configured || !query.trim()) return [];
+    if (!query.trim()) return [];
     const near = opts && opts.near;
     const body = { textQuery: query, maxResultCount: 5 };
     // Biases (doesn't restrict) results toward a destination that's already been picked,
@@ -19,13 +15,9 @@ window.PinsPlaces = (function () {
       body.locationBias = { circle: { center: { latitude: near.la, longitude: near.ln }, radius: 50000 } };
     }
     try {
-      const res = await fetch(BASE + '/places:searchText', {
+      const res = await fetch('/api/places/search', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': cfg.apiKey,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
       if (!res.ok) { console.warn('pins-places: search failed', await res.text()); return []; }
@@ -46,11 +38,11 @@ window.PinsPlaces = (function () {
   // "Puglia", say). Predictions don't carry coordinates, so picking one requires a
   // follow-up getPlaceLocation() call.
   async function searchLocations(query) {
-    if (!configured || !query.trim()) return [];
+    if (!query.trim()) return [];
     try {
-      const res = await fetch(BASE + '/places:autocomplete', {
+      const res = await fetch('/api/places/autocomplete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': cfg.apiKey },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input: query, includedPrimaryTypes: ['(regions)'] })
       });
       if (!res.ok) { console.warn('pins-places: location search failed', await res.text()); return []; }
@@ -68,11 +60,8 @@ window.PinsPlaces = (function () {
   }
 
   async function getPlaceLocation(placeId) {
-    if (!configured) return null;
     try {
-      const res = await fetch(BASE + '/places/' + placeId, {
-        headers: { 'X-Goog-Api-Key': cfg.apiKey, 'X-Goog-FieldMask': 'location,formattedAddress' }
-      });
+      const res = await fetch('/api/places/details?placeId=' + encodeURIComponent(placeId) + '&fields=' + encodeURIComponent('location,formattedAddress'));
       if (!res.ok) { console.warn('pins-places: location details failed', await res.text()); return null; }
       const d = await res.json();
       return { la: d.location && d.location.latitude, ln: d.location && d.location.longitude, address: d.formattedAddress };
@@ -96,14 +85,8 @@ window.PinsPlaces = (function () {
   }
 
   async function getDetails(placeId) {
-    if (!configured) return null;
     try {
-      const res = await fetch(BASE + '/places/' + placeId, {
-        headers: {
-          'X-Goog-Api-Key': cfg.apiKey,
-          'X-Goog-FieldMask': 'displayName,formattedAddress,location,regularOpeningHours,priceLevel,rating,photos'
-        }
-      });
+      const res = await fetch('/api/places/details?placeId=' + encodeURIComponent(placeId) + '&fields=' + encodeURIComponent('displayName,formattedAddress,location,regularOpeningHours,priceLevel,rating,photos'));
       if (!res.ok) { console.warn('pins-places: details failed', await res.text()); return null; }
       const d = await res.json();
       return {
@@ -119,9 +102,9 @@ window.PinsPlaces = (function () {
   }
 
   async function fetchPhotoBlob(photoName, maxWidthPx) {
-    if (!configured || !photoName) return null;
+    if (!photoName) return null;
     try {
-      const url = BASE + '/' + photoName + '/media?maxWidthPx=' + (maxWidthPx || 800) + '&key=' + cfg.apiKey;
+      const url = '/api/places/photo?photoName=' + encodeURIComponent(photoName) + '&maxWidthPx=' + (maxWidthPx || 800);
       const res = await fetch(url);
       if (!res.ok) return null;
       return await res.blob();
