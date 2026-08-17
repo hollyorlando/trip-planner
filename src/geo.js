@@ -24,6 +24,18 @@ window.PinsGeo = (function () {
     catch (e) { return 'link'; }
   }
 
+  // Short badge shown next to a saved link, based on the source platform.
+  function badge(u) {
+    if (!u) return 'WEB';
+    if (u.indexOf('tiktok') > -1) return 'TT';
+    if (u.indexOf('instagram') > -1) return 'IG';
+    if (u.indexOf('youtube') > -1 || u.indexOf('youtu.be') > -1) return 'YT';
+    if (u.indexOf('google') > -1) return 'MAP';
+    if (u.indexOf('reddit') > -1) return 'RDT';
+    if (u.indexOf('substack') > -1) return 'SUB';
+    return 'WEB';
+  }
+
   // Infer a Paris arrondissement from a pin's actual coordinates, by nearest centroid.
   function arrFromLatLng(la, ln) {
     if (la == null || ln == null) return null;
@@ -35,5 +47,5 @@ window.PinsGeo = (function () {
     return best;
   }
 
-  return { hav, fmtKm, host, arrFromLatLng };
+  return { hav, fmtKm, host, badge, arrFromLatLng };
 })();
