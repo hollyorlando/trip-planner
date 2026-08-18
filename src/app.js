@@ -377,7 +377,7 @@
               <span onClick=${askDelete} className="icon-btn" style=${{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: 999, flex: 'none' }}>${TrashIcon({})}</span>
             </div>
           </div>
-          <div style=${{ fontSize: 14, color: '#b3b3b3', marginBottom: 14 }}>${n ? n + ' spots saved · ' + dotKeys.length + ' kinds of spot' : 'no spots yet — start pinning'}</div>
+          <div style=${{ fontSize: 14, color: '#b3b3b3', marginBottom: 14 }}>${n ? n + (n === 1 ? ' spot saved · ' : ' spots saved · ') + dotKeys.length + (dotKeys.length === 1 ? ' kind of spot' : ' kinds of spot') : 'no spots yet — start pinning'}</div>
           <div style=${{ display: 'flex', gap: 4 }}>
             ${dots.map((c, i) => html`<div key=${i} style=${{ width: 14, height: 14, borderRadius: 999, background: c }}/>`)}
           </div>
@@ -395,7 +395,7 @@
             style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', borderRadius: 999, padding: '7px 13px', whiteSpace: 'nowrap' }}>new trip</button>
         </div>
         <h1 style=${{ fontSize: 42, lineHeight: 1, letterSpacing: '-0.9px', fontWeight: 600, textTransform: 'lowercase', margin: '0 0 10px' }}>your trips</h1>
-        <p style=${{ fontSize: 16, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 26px', maxWidth: 300 }}>every rec you screenshotted, dropped on one map. open a trip to see it.</p>
+        <p style=${{ fontSize: 16, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 26px', maxWidth: 300 }}>a map for every trip, and a pin for every spot.</p>
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           ${state.trips.map(t => tripCard(t, state, patch))}
         </div>
@@ -926,7 +926,7 @@
                 <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, color: '#9e9e9e' }}>read from where the pin landed</span>
               </div>
             ` : html`
-              <p style=${{ fontSize: 13, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 10px' }}>look it up on google above and the pin — and its arrondissement — place themselves.</p>
+              <p style=${{ fontSize: 13, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 10px' }}>the pin — and its arrondissement — place themselves once this is filled in.</p>
             `}
             <div style=${MONO_HEADER}>source links</div>
             ${f.urls.map((u, i) => html`
@@ -941,7 +941,7 @@
             <button type="button" onClick=${addUrlField}
               style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9e9e9e', marginBottom: 14 }}>+ add another link</button>
             <div style=${MONO_HEADER}>why you saved it</div>
-            <textarea value=${f.note} onChange=${setField('note')} placeholder="the thing you'll forget otherwise"
+            <textarea value=${f.note} onChange=${setField('note')} placeholder="reasons to detour to this spot"
               style=${{ width: '100%', minHeight: 70, resize: 'vertical', border: '1px solid #333333', borderRadius: 16, padding: '11px 13px', fontSize: 15, lineHeight: 1.45, marginBottom: 16 }}/>
             <button type="button" onClick=${saveSpot}
               style=${{ width: '100%', background: f.name.trim() ? '#fff' : '#1e1e1e', color: f.name.trim() ? '#131313' : '#737373', borderRadius: 999, padding: 15, fontSize: 16, fontWeight: 500, textTransform: 'lowercase' }}>${f.name.trim() ? 'drop the pin' : 'name it first'}</button>
@@ -1020,7 +1020,7 @@
             <button type="button" onClick=${close} style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, color: '#b3b3b3' }}>close</button>
           </div>
           <div style=${{ flex: 1, overflowY: 'auto', padding: '0 16px 22px' }}>
-            <p style=${{ fontSize: 14, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 16px' }}>every distance on the map is measured from whichever stay is current. add more than one if you're splitting the trip between places, each with its own dates.</p>
+            <p style=${{ fontSize: 14, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 16px' }}>where you're sleeping, so we know what's nearby. add more than one if you're splitting the trip between places, each with its own dates.</p>
 
             ${list.length ? html`
               <div style=${MONO_HEADER}>your stays</div>
