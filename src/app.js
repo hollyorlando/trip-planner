@@ -395,7 +395,7 @@
             style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', borderRadius: 999, padding: '7px 13px', whiteSpace: 'nowrap' }}>new trip</button>
         </div>
         <h1 style=${{ fontSize: 42, lineHeight: 1, letterSpacing: '-0.9px', fontWeight: 600, textTransform: 'lowercase', margin: '0 0 10px' }}>your trips</h1>
-        <p style=${{ fontSize: 16, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 26px', maxWidth: 300 }}>a map for every trip, and a pin for every spot.</p>
+        <p style=${{ fontSize: 16, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 26px' }}>a map for every trip, and a pin for every spot.</p>
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           ${state.trips.map(t => tripCard(t, state, patch))}
         </div>
@@ -810,7 +810,6 @@
   function AddSpotSheet({ state, patch, bump }) {
     const f = state.f;
     const gp = f.googlePlace;
-    const arr = gp && gp.la != null ? G.arrFromLatLng(gp.la, gp.ln) : null;
     const close = () => patch({ addOpen: false });
     const setField = (k) => (e) => patch({ f: { ...state.f, [k]: e.target.value } });
     const pickCat = (k) => () => patch({ f: { ...state.f, cat: k } });
@@ -917,17 +916,9 @@
                 </button>
               `; })}
             </div>
-            <div style=${MONO_HEADER}>street address</div>
-            <input value=${f.addr} onChange=${setField('addr')} placeholder="35 rue de bretagne, 75003"
-              style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 15, marginBottom: 10 }}/>
-            ${arr ? html`
-              <div style=${{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14 }}>
-                <span style=${{ flex: 'none', background: '#fff', color: '#131313', borderRadius: 999, padding: '6px 11px', fontSize: 12.5, fontWeight: 600, textTransform: 'lowercase', whiteSpace: 'nowrap' }}>${arr} · ${D.hoods[arr] || ''}</span>
-                <span style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, color: '#9e9e9e' }}>read from where the pin landed</span>
-              </div>
-            ` : html`
-              <p style=${{ fontSize: 13, lineHeight: 1.45, color: '#b3b3b3', margin: '0 0 10px' }}>the pin — and its arrondissement — place themselves once this is filled in.</p>
-            `}
+            <div style=${MONO_HEADER}>why you saved it</div>
+            <textarea value=${f.note} onChange=${setField('note')} placeholder="reasons to detour to this spot"
+              style=${{ width: '100%', minHeight: 70, resize: 'vertical', border: '1px solid #333333', borderRadius: 16, padding: '11px 13px', fontSize: 15, lineHeight: 1.45, marginBottom: 16 }}/>
             <div style=${MONO_HEADER}>source links</div>
             ${f.urls.map((u, i) => html`
               <div key=${i} style=${{ display: 'flex', gap: 8, marginBottom: 8 }}>
@@ -940,9 +931,6 @@
             `)}
             <button type="button" onClick=${addUrlField}
               style=${{ fontFamily: "'Character Mono',monospace", fontSize: 11, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9e9e9e', marginBottom: 14 }}>+ add another link</button>
-            <div style=${MONO_HEADER}>why you saved it</div>
-            <textarea value=${f.note} onChange=${setField('note')} placeholder="reasons to detour to this spot"
-              style=${{ width: '100%', minHeight: 70, resize: 'vertical', border: '1px solid #333333', borderRadius: 16, padding: '11px 13px', fontSize: 15, lineHeight: 1.45, marginBottom: 16 }}/>
             <button type="button" onClick=${saveSpot}
               style=${{ width: '100%', background: f.name.trim() ? '#fff' : '#1e1e1e', color: f.name.trim() ? '#131313' : '#737373', borderRadius: 999, padding: 15, fontSize: 16, fontWeight: 500, textTransform: 'lowercase' }}>${f.name.trim() ? 'drop the pin' : 'name it first'}</button>
             <p style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, color: '#9e9e9e', textAlign: 'center', margin: '10px 0 0' }}>saves to this trip, on this device.</p>
