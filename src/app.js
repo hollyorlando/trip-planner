@@ -6,7 +6,7 @@
   const { useState, useEffect, useRef, useCallback } = React;
 
   const MONO_HEADER = { fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#9e9e9e', marginBottom: 7 };
-  const DATE_INPUT_STYLE = { flex: 1, minWidth: 0, border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 14, background: 'transparent', colorScheme: 'dark' };
+  const DATE_INPUT_STYLE = { flex: 1, minWidth: 0, border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 16, background: 'transparent', colorScheme: 'dark' };
 
   // ---------- date formatting ----------
 
@@ -307,7 +307,7 @@
         <div style=${{ flex: 1, minWidth: 0, position: 'relative' }}>
           ${picked ? html`<span style=${{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: '#aed900', fontSize: 15, pointerEvents: 'none' }}>✓</span>` : null}
           <input value=${value.name} onChange=${(e) => onChange({ name: e.target.value })} onKeyDown=${onKeyDown} placeholder=${namePlaceholder} readOnly=${locked}
-            style=${{ width: '100%', border: `1px solid ${picked ? '#fff' : '#333333'}`, borderRadius: 14, padding: picked ? '11px 13px 11px 34px' : '11px 13px', fontSize: 15, background: locked ? '#1e1e1e' : 'transparent', color: '#fff' }}/>
+            style=${{ width: '100%', border: `1px solid ${picked ? '#fff' : '#333333'}`, borderRadius: 14, padding: picked ? '11px 13px 11px 34px' : '11px 13px', fontSize: 16, background: locked ? '#1e1e1e' : 'transparent', color: '#fff' }}/>
         </div>
         ${window.PinsPlaces.isConfigured() ? html`
           <button type="button" onClick=${picked ? change : doSearch} disabled=${!picked && (!value.name.trim() || value.locSearching)}
@@ -643,7 +643,7 @@
           <div style=${{ display: 'flex', alignItems: 'center', gap: 8, background: '#1e1e1e', borderRadius: 999, padding: '0 14px', height: 40, marginBottom: 10 }}>
             ${SearchIcon()}
             <input value=${state.query} onChange=${(e) => patch({ query: e.target.value })} placeholder="search spots, notes, tags"
-              style=${{ flex: 1, minWidth: 0, border: 0, background: 'transparent', height: 38, fontSize: 15, outline: 'none' }} />
+              style=${{ flex: 1, minWidth: 0, border: 0, background: 'transparent', height: 38, fontSize: 16, outline: 'none' }} />
           </div>
           <div style=${{ display: 'flex', gap: 7, overflowX: 'auto', maxWidth: '100%', padding: '2px 0 12px' }}>
             ${catKeys.map(k => {
@@ -775,9 +775,9 @@
               ${state.addingLink ? html`
                 <div style=${{ display: 'flex', flexDirection: 'column', gap: 8, background: '#1e1e1e', border: '1px solid #2a2a2a', borderRadius: 16, padding: 12 }}>
                   <input value=${state.linkTitleDraft} onChange=${setLinkTitleDraft} placeholder="label (e.g. tiktok walkthrough)" autofocus
-                    style=${{ border: '1px solid #333333', borderRadius: 12, padding: '9px 11px', fontSize: 13.5, background: 'transparent', color: '#fff' }}/>
+                    style=${{ border: '1px solid #333333', borderRadius: 12, padding: '9px 11px', fontSize: 16, background: 'transparent', color: '#fff' }}/>
                   <input value=${state.linkDraft} onChange=${setLinkDraft} onKeyDown=${onLinkUrlKey} placeholder="https://…"
-                    style=${{ border: '1px solid #333333', borderRadius: 12, padding: '9px 11px', fontSize: 13, fontFamily: "'Character Mono',monospace", background: 'transparent', color: '#fff' }}/>
+                    style=${{ border: '1px solid #333333', borderRadius: 12, padding: '9px 11px', fontSize: 16, fontFamily: "'Character Mono',monospace", background: 'transparent', color: '#fff' }}/>
                   <div style=${{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                     <button type="button" onClick=${cancelAddLink}
                       style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9e9e9e', border: '1px solid #333333', borderRadius: 999, padding: '8px 13px' }}>cancel</button>
@@ -795,7 +795,7 @@
             <div style=${{ marginBottom: 14 }}>
               <div style=${MONO_HEADER}>notes</div>
               <textarea value=${d.no || ''} onChange=${setNote} placeholder="what do you want to order? who told you about it?"
-                style=${{ width: '100%', minHeight: 84, resize: 'vertical', border: '1px solid #333333', borderRadius: 16, padding: '12px 13px', fontSize: 14.5, lineHeight: 1.45, background: '#131313' }}/>
+                style=${{ width: '100%', minHeight: 84, resize: 'vertical', border: '1px solid #333333', borderRadius: 16, padding: '12px 13px', fontSize: 16, lineHeight: 1.45, background: '#131313' }}/>
             </div>
             <button type="button" onClick=${removeSpot}
               style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#f62350', border: '1px solid #4a1620', borderRadius: 999, padding: '9px 14px' }}>remove from trip</button>
@@ -884,7 +884,7 @@
           <div style=${{ flex: 1, overflowY: 'auto', padding: '6px 16px 20px' }}>
             <div style=${MONO_HEADER}>name</div>
             <input value=${f.name} onChange=${setField('name')} placeholder="e.g. du pain et des idées"
-              style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 15, marginBottom: 10 }}/>
+              style=${{ width: '100%', border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 16, marginBottom: 10 }}/>
             ${window.PinsPlaces.isConfigured() ? html`
               ${f.googlePlace ? html`
                 <div style=${{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14, background: '#1e1e1e', borderRadius: 14, padding: '10px 12px' }}>
@@ -918,12 +918,12 @@
             </div>
             <div style=${MONO_HEADER}>why you saved it</div>
             <textarea value=${f.note} onChange=${setField('note')} placeholder="reasons to detour to this spot"
-              style=${{ width: '100%', minHeight: 70, resize: 'vertical', border: '1px solid #333333', borderRadius: 16, padding: '11px 13px', fontSize: 15, lineHeight: 1.45, marginBottom: 16 }}/>
+              style=${{ width: '100%', minHeight: 70, resize: 'vertical', border: '1px solid #333333', borderRadius: 16, padding: '11px 13px', fontSize: 16, lineHeight: 1.45, marginBottom: 16 }}/>
             <div style=${MONO_HEADER}>source links</div>
             ${f.urls.map((u, i) => html`
               <div key=${i} style=${{ display: 'flex', gap: 8, marginBottom: 8 }}>
                 <input value=${u} onChange=${setUrlAt(i)} placeholder="paste the tiktok or instagram url"
-                  style=${{ flex: 1, minWidth: 0, border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 15 }}/>
+                  style=${{ flex: 1, minWidth: 0, border: '1px solid #333333', borderRadius: 14, padding: '11px 13px', fontSize: 16 }}/>
                 ${f.urls.length > 1 ? html`
                   <button type="button" onClick=${removeUrlField(i)} aria-label="remove link" style=${{ flex: 'none', fontFamily: "'Character Mono',monospace", fontSize: 15, color: '#9e9e9e', padding: '0 6px' }}>×</button>
                 ` : null}
@@ -1030,9 +1030,9 @@
                       </div>
                       ${editing ? html`
                         <div style=${{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-                          <input type="date" value=${state.stayEditStart} onChange=${(e) => patch({ stayEditStart: e.target.value })} style=${{ ...DATE_INPUT_STYLE, fontSize: 13, padding: '7px 10px', borderRadius: 10 }}/>
+                          <input type="date" value=${state.stayEditStart} onChange=${(e) => patch({ stayEditStart: e.target.value })} style=${{ ...DATE_INPUT_STYLE, fontSize: 16, padding: '7px 10px', borderRadius: 10 }}/>
                           <span style=${{ color: '#737373', flex: 'none' }}>–</span>
-                          <input type="date" value=${state.stayEditEnd} min=${state.stayEditStart || undefined} onChange=${(e) => patch({ stayEditEnd: e.target.value })} style=${{ ...DATE_INPUT_STYLE, fontSize: 13, padding: '7px 10px', borderRadius: 10 }}/>
+                          <input type="date" value=${state.stayEditEnd} min=${state.stayEditStart || undefined} onChange=${(e) => patch({ stayEditEnd: e.target.value })} style=${{ ...DATE_INPUT_STYLE, fontSize: 16, padding: '7px 10px', borderRadius: 10 }}/>
                         </div>
                         <div style=${{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8 }}>
                           <button type="button" onClick=${saveEditDates} style=${{ fontFamily: "'Character Mono',monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#fff' }}>save</button>
@@ -1055,7 +1055,7 @@
               <div style=${{ flex: 1, minWidth: 0, position: 'relative' }}>
                 ${sf.googlePlace ? html`<span style=${{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: '#aed900', fontSize: 15, pointerEvents: 'none' }}>✓</span>` : null}
                 <input value=${sf.name} onChange=${setSFName} onKeyDown=${onSFKeyDown} placeholder="search by name or address — sheraton montreal, 12 rue de bretagne…"
-                  style=${{ width: '100%', border: `1px solid ${sf.googlePlace ? '#fff' : '#333333'}`, borderRadius: 14, padding: sf.googlePlace ? '11px 13px 11px 34px' : '11px 13px', fontSize: 15, background: 'transparent', color: '#fff' }}/>
+                  style=${{ width: '100%', border: `1px solid ${sf.googlePlace ? '#fff' : '#333333'}`, borderRadius: 14, padding: sf.googlePlace ? '11px 13px 11px 34px' : '11px 13px', fontSize: 16, background: 'transparent', color: '#fff' }}/>
               </div>
               ${window.PinsPlaces.isConfigured() ? html`
                 <button type="button" onClick=${sf.googlePlace ? changeStayGoogle : doStayGoogleSearch} disabled=${!sf.googlePlace && (!sf.name.trim() || sf.googleSearching)}
