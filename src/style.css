@@ -32,13 +32,12 @@ input:focus,textarea:focus{outline:2px solid #fff;outline-offset:0}
 @keyframes locPulse{0%{transform:scale(.5);opacity:.55}100%{transform:scale(1.4);opacity:0}}
 
 .app-shell{
-  max-width:520px;margin:0 auto;height:100vh;height:100dvh;height:var(--app-h);
-  background:#131313;position:relative;overflow:hidden;
+  max-width:520px;margin:0 auto;position:fixed;inset:0;
+  background:#131313;overflow:hidden;
   font-size:16px;line-height:1.45;
 }
 @media (min-width:640px){
-  body{padding:24px 0}
-  .app-shell{height:calc(100vh - 48px);height:calc(100dvh - 48px);height:calc(var(--app-h) - 48px);border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  .app-shell{top:24px;bottom:24px;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
 }
 
 /* generic hover/active helpers used via className */
