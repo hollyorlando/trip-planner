@@ -1240,7 +1240,7 @@
 
   function App() {
     const [state, setState] = useState(makeInitialState);
-    const [, setPhotoTick] = useState(0);
+    const [photoTick, setPhotoTick] = useState(0);
     const bump = () => setPhotoTick(t => t + 1);
     const patch = (p) => setState(prev => ({ ...prev, ...(typeof p === 'function' ? p(prev) : p) }));
 
@@ -1290,9 +1290,12 @@
             stays: remote.stays || state.stays,
             activeStay: remote.activeStay || state.activeStay
           });
+          S.applyPhotos(remote.photos);
+          bump();
         } else {
           await window.PinsSync.saveSharedState({
-            trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay
+            trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay,
+            photos: S.collectPhotos(state.spots.map(s => s.id))
           });
         }
         setSyncReady(true);
@@ -1304,11 +1307,15 @@
       if (!syncOn || !syncReady) return;
       const t = setTimeout(() => {
         window.PinsSync.saveSharedState({
-          trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay
+          trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay,
+          photos: S.collectPhotos(state.spots.map(s => s.id))
         });
       }, 800);
       return () => clearTimeout(t);
-    }, [state.trips, state.spots, state.stays, state.activeStay, syncReady]);
+      // photoTick isn't part of the payload directly, but a saved/cleared photo needs to
+      // re-trigger this push the same way an edited spot does — it only touches
+      // localStorage, so none of the other deps would otherwise notice it changed.
+    }, [state.trips, state.spots, state.stays, state.activeStay, syncReady, photoTick]);
 
     // ---- user's live location (for the "you are here" map dot + distance-to-pin) ----
     const [userLoc, setUserLoc] = useState(null);

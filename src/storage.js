@@ -2,6 +2,7 @@
 window.PinsStorage = (function () {
   const KEY = 'pins-trip-app:v1';
   const PHOTO_PREFIX = 'pins-trip-app:photo:';
+  const MAX_PHOTOS_PER_SPOT = 3;
 
   function load() {
     try {
@@ -38,6 +39,30 @@ window.PinsStorage = (function () {
     try { localStorage.removeItem(photoKey(spotId, i)); } catch (e) {}
   }
 
+  // Photos are cached in localStorage only, so they never leave the device that added
+  // them. These let the sync blob carry them too, piggybacking on the same "one shared
+  // JSON row" mechanism as everything else, so a photo added on one device shows up on
+  // the rest instead of disappearing there.
+  function collectPhotos(spotIds) {
+    const out = [];
+    spotIds.forEach(id => {
+      for (let i = 0; i < MAX_PHOTOS_PER_SPOT; i++) {
+        const dataUrl = loadPhoto(id, i);
+        if (dataUrl) out.push({ id, i, dataUrl });
+      }
+    });
+    return out;
+  }
+
+  // Fills in photos this device doesn't have yet; never overwrites a local one, so an
+  // in-progress local edit can't be clobbered by a stale remote copy.
+  function applyPhotos(list) {
+    if (!list) return;
+    list.forEach(({ id, i, dataUrl }) => {
+      if (!loadPhoto(id, i)) savePhoto(id, i, dataUrl);
+    });
+  }
+
   // Downscale + JPEG-compress an uploaded image so it fits comfortably in localStorage.
   function compressImage(file, maxDim = 1000, quality = 0.75) {
     return new Promise((resolve, reject) => {
@@ -59,5 +84,5 @@ window.PinsStorage = (function () {
     });
   }
 
-  return { load, save, loadPhoto, savePhoto, removePhoto, compressImage };
+  return { load, save, loadPhoto, savePhoto, removePhoto, compressImage, collectPhotos, applyPhotos };
 })();

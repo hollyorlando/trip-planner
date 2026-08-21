@@ -1,7 +1,8 @@
 // Cross-device sync: everyone who opens the app with this deploy's Supabase config
 // reads and writes the same shared row. No login — simplest possible sync for a
 // single person (or trusted group) using one link across devices.
-// Photos stay local-only for now (not synced).
+// Photos ride along in the same blob (see PinsStorage.collectPhotos/applyPhotos in
+// app.js) so they don't stay stuck on whichever device first cached them.
 window.PinsSync = (function () {
   const cfg = window.PINS_SUPABASE_CONFIG || {};
   const configured = !!(cfg.url && cfg.anonKey && cfg.url !== 'YOUR_SUPABASE_URL' && cfg.anonKey !== 'YOUR_SUPABASE_ANON_KEY');
