@@ -7,12 +7,20 @@
 <script>
 (function () {
   function setAppHeight() {
-    document.documentElement.style.setProperty('--app-h', window.innerHeight + 'px');
+    const h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+    document.documentElement.style.setProperty('--app-h', h + 'px');
   }
   setAppHeight();
   window.addEventListener('resize', setAppHeight);
   window.addEventListener('orientationchange', setAppHeight);
   window.addEventListener('pageshow', setAppHeight);
+  window.addEventListener('load', setAppHeight);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', setAppHeight);
+  }
+  // iOS can settle the real viewport size a beat after a cold standalone-PWA
+  // launch without firing any of the above events, so re-check for a bit.
+  [50, 150, 300, 600, 1200].forEach((ms) => setTimeout(setAppHeight, ms));
 })();
 </script>
 <meta name="apple-mobile-web-app-capable" content="yes">
