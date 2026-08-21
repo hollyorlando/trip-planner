@@ -63,6 +63,19 @@ window.PinsStorage = (function () {
     });
   }
 
+  // A device that hasn't cached every photo locally (a fresh install, or one that hit
+  // its storage quota partway through applyPhotos) must not push that partial set as
+  // the new synced record — it would erase photos another device already contributed.
+  // Union the last-seen remote set with whatever this device has locally, local
+  // winning on conflicts, then drop anything for a spot that no longer exists.
+  function mergePhotos(remoteList, localList, validSpotIds) {
+    const map = new Map();
+    (remoteList || []).forEach(p => map.set(p.id + ':' + p.i, p));
+    (localList || []).forEach(p => map.set(p.id + ':' + p.i, p));
+    const valid = new Set(validSpotIds);
+    return Array.from(map.values()).filter(p => valid.has(p.id));
+  }
+
   // Downscale + JPEG-compress an uploaded image so it fits comfortably in localStorage.
   function compressImage(file, maxDim = 1000, quality = 0.75) {
     return new Promise((resolve, reject) => {
@@ -84,5 +97,5 @@ window.PinsStorage = (function () {
     });
   }
 
-  return { load, save, loadPhoto, savePhoto, removePhoto, compressImage, collectPhotos, applyPhotos };
+  return { load, save, loadPhoto, savePhoto, removePhoto, compressImage, collectPhotos, applyPhotos, mergePhotos };
 })();

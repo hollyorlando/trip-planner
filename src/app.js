@@ -1261,6 +1261,11 @@
     const syncOn = window.PinsSync.isConfigured();
     const [syncReady, setSyncReady] = useState(!syncOn);
     const mergedRef = useRef(false);
+    // Last photo set known to be on the shared row. A device that hasn't cached every
+    // photo locally (fresh install, or one that hit its storage quota partway through
+    // applyPhotos) must union with this before pushing, or it'll erase photos another
+    // device already contributed.
+    const remotePhotosRef = useRef([]);
 
     // Triggers the fade-out once conditions are met; deliberately excludes `boot`
     // from deps so it doesn't re-fire (and cancel the effect below) once boot flips to 'out'.
@@ -1291,12 +1296,15 @@
             activeStay: remote.activeStay || state.activeStay
           });
           S.applyPhotos(remote.photos);
+          remotePhotosRef.current = remote.photos || [];
           bump();
         } else {
+          const photos = S.collectPhotos(state.spots.map(s => s.id));
           await window.PinsSync.saveSharedState({
             trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay,
-            photos: S.collectPhotos(state.spots.map(s => s.id))
+            photos
           });
+          remotePhotosRef.current = photos;
         }
         setSyncReady(true);
       })();
@@ -1306,9 +1314,12 @@
     useEffect(() => {
       if (!syncOn || !syncReady) return;
       const t = setTimeout(() => {
+        const spotIds = state.spots.map(s => s.id);
+        const photos = S.mergePhotos(remotePhotosRef.current, S.collectPhotos(spotIds), spotIds);
+        remotePhotosRef.current = photos;
         window.PinsSync.saveSharedState({
           trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay,
-          photos: S.collectPhotos(state.spots.map(s => s.id))
+          photos
         });
       }, 800);
       return () => clearTimeout(t);
