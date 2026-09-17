@@ -101,15 +101,13 @@ window.PinsPlaces = (function () {
     } catch (err) { console.warn('pins-places: details error', err); return null; }
   }
 
-  async function fetchPhotoBlob(photoName, maxWidthPx) {
+  // A Google photo is rendered straight from the proxy rather than downloaded and
+  // cached — the proxy sets a 24h Cache-Control, so the browser's HTTP cache does the
+  // job localStorage used to, without spending any of its ~5MB quota.
+  function photoUrl(photoName, maxWidthPx) {
     if (!photoName) return null;
-    try {
-      const url = '/api/places/photo?photoName=' + encodeURIComponent(photoName) + '&maxWidthPx=' + (maxWidthPx || 800);
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      return await res.blob();
-    } catch (err) { console.warn('pins-places: photo error', err); return null; }
+    return '/api/places/photo?photoName=' + encodeURIComponent(photoName) + '&maxWidthPx=' + (maxWidthPx || 800);
   }
 
-  return { isConfigured, searchPlaces, searchLocations, getPlaceLocation, getDetails, fetchPhotoBlob };
+  return { isConfigured, searchPlaces, searchLocations, getPlaceLocation, getDetails, photoUrl };
 })();
