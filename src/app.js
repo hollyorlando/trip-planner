@@ -1269,8 +1269,26 @@
 
     // ---- cross-device sync (Supabase, shared — no login) ----
     const syncOn = window.PinsSync.isConfigured();
+    // Two separate gates. syncReady only means "boot can stop waiting on the network",
+    // so a device that can't reach Supabase still starts. syncLive means "we've actually
+    // read the shared row", which is the only state in which pushing is safe — pushing
+    // without having read it is how a device overwrites everyone else with its own copy.
     const [syncReady, setSyncReady] = useState(!syncOn);
+    const [syncLive, setSyncLive] = useState(false);
     const mergedRef = useRef(false);
+    // The pull can be retried long after mount, so it reads state through a ref instead
+    // of the copy captured when the effect first ran.
+    const stateRef = useRef(state);
+    useEffect(() => { stateRef.current = state; });
+    // A retry merge replaces trips/spots wholesale. There's no per-record reconciliation
+    // here, so once the user has changed something locally a late merge would silently
+    // discard it — better to stay local-only for the session than to lose their edits.
+    const dirtyRef = useRef(false);
+    const firstStateRun = useRef(true);
+    useEffect(() => {
+      if (firstStateRun.current) { firstStateRun.current = false; return; }
+      dirtyRef.current = true;
+    }, [state.trips, state.spots, state.stays, state.activeStay]);
     // Last photo set known to be on the shared row. A device that hasn't cached every
     // photo locally (fresh install, or one that hit its storage quota partway through
     // applyPhotos) must union with this before pushing, or it'll erase photos another
@@ -1292,37 +1310,72 @@
     }, [boot]);
 
     useEffect(() => {
-      if (!syncOn || mergedRef.current) return;
-      mergedRef.current = true;
-      (async () => {
-        const remote = await window.PinsSync.loadSharedState();
+      if (!syncOn) return;
+      let cancelled = false;
+
+      const pull = async () => {
+        if (cancelled || mergedRef.current) return;
+        const res = await window.PinsSync.loadSharedState();
+        if (cancelled || mergedRef.current) return;
+        if (!res.ok) {
+          // Couldn't reach the shared row. Start the app local-only and stay out of push
+          // mode: an edit made now must not be written over what's actually stored there.
+          console.warn('pins-sync: starting local-only, shared state unreachable');
+          setSyncReady(true);
+          return;
+        }
+        mergedRef.current = true;
+        const remote = res.data;
         if (remote) {
+          const cur = stateRef.current;
           patch({
-            trips: remote.trips ? migrateTripLegs(remote.trips) : state.trips,
+            trips: remote.trips ? migrateTripLegs(remote.trips) : cur.trips,
             // Retired hotel-category spots (the old pinned/saved-hotels list) can still be
             // sitting in older synced data — strip them here too, not just from local storage.
-            spots: remote.spots ? migrateSpotLinks(remote.spots.filter(s => s.c !== 'hotel')) : state.spots,
-            stays: remote.stays || state.stays,
-            activeStay: remote.activeStay || state.activeStay
+            spots: remote.spots ? migrateSpotLinks(remote.spots.filter(s => s.c !== 'hotel')) : cur.spots,
+            stays: remote.stays || cur.stays,
+            activeStay: remote.activeStay || cur.activeStay
           });
           S.applyPhotos(remote.photos);
           remotePhotosRef.current = remote.photos || [];
           bump();
         } else {
-          const photos = S.collectPhotos(state.spots.map(s => s.id));
-          await window.PinsSync.saveSharedState({
-            trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay,
+          // An authoritative read came back empty, so this really is the first device.
+          const cur = stateRef.current;
+          const photos = S.collectPhotos(cur.spots.map(s => s.id));
+          const saved = await window.PinsSync.saveSharedState({
+            trips: cur.trips, spots: cur.spots, stays: cur.stays, activeStay: cur.activeStay,
             photos
           });
-          remotePhotosRef.current = photos;
+          if (saved) remotePhotosRef.current = photos;
         }
+        setSyncLive(true);
         setSyncReady(true);
-      })();
+      };
+
+      pull();
+
+      // A first pull that failed on a dead connection shouldn't cost sync for the whole
+      // session, so retry when the device looks reachable again — but only while nothing
+      // has been edited locally, since the merge above would overwrite those edits.
+      const retry = () => {
+        if (mergedRef.current || dirtyRef.current) return;
+        pull();
+      };
+      // visibilitychange also fires on hide, which is no reason to pull.
+      const retryIfVisible = () => { if (document.visibilityState === 'visible') retry(); };
+      window.addEventListener('online', retry);
+      document.addEventListener('visibilitychange', retryIfVisible);
+      return () => {
+        cancelled = true;
+        window.removeEventListener('online', retry);
+        document.removeEventListener('visibilitychange', retryIfVisible);
+      };
       // eslint-disable-next-line
     }, []);
 
     useEffect(() => {
-      if (!syncOn || !syncReady) return;
+      if (!syncOn || !syncLive) return;
       const t = setTimeout(() => {
         const spotIds = state.spots.map(s => s.id);
         const photos = S.mergePhotos(remotePhotosRef.current, S.collectPhotos(spotIds), spotIds);
@@ -1336,7 +1389,7 @@
       // photoTick isn't part of the payload directly, but a saved/cleared photo needs to
       // re-trigger this push the same way an edited spot does — it only touches
       // localStorage, so none of the other deps would otherwise notice it changed.
-    }, [state.trips, state.spots, state.stays, state.activeStay, syncReady, photoTick]);
+    }, [state.trips, state.spots, state.stays, state.activeStay, syncLive, photoTick]);
 
     // ---- user's live location (for the "you are here" map dot + distance-to-pin) ----
     const [userLoc, setUserLoc] = useState(null);
