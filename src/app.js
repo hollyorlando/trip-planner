@@ -207,9 +207,15 @@
 
   // ---------- photo slot ----------
 
-  function PhotoSlot({ spotId, index, width, height, radius, placeholder, bump }) {
+  // Two possible sources, in priority order: a photo you uploaded (a data URL in
+  // localStorage) beats the spot's Google photo for that slot. Google photos are only
+  // ever a URL pointed at /api/places/photo — storing their bytes locally is what used
+  // to blow the ~5MB localStorage quota and make photos silently stop appearing.
+  function PhotoSlot({ spotId, index, width, height, radius, placeholder, photoName, onDropPhotoName, bump }) {
     const inputRef = useRef(null);
-    const src = S.loadPhoto(spotId, index);
+    const [failed, setFailed] = useState(false);
+    const local = S.loadPhoto(spotId, index);
+    const src = local || (!failed ? window.PinsPlaces.photoUrl(photoName) : null);
     const pick = () => inputRef.current && inputRef.current.click();
     const onChange = async (e) => {
       const file = e.target.files && e.target.files[0];
@@ -217,15 +223,24 @@
       if (!file) return;
       try {
         const dataUrl = await S.compressImage(file);
-        S.savePhoto(spotId, index, dataUrl);
+        if (!S.savePhoto(spotId, index, dataUrl)) {
+          alert('no room left to save that photo on this device — clear a photo and try again.');
+          return;
+        }
         bump();
       } catch (err) { console.warn('pins: could not read photo', err); }
     };
-    const clear = (e) => { e.stopPropagation(); S.removePhoto(spotId, index); bump(); };
+    // Clearing an uploaded photo reveals the Google one underneath again; clearing a
+    // Google photo drops its name from the spot, so it stays gone across devices.
+    const clear = (e) => {
+      e.stopPropagation();
+      if (local) { S.removePhoto(spotId, index); bump(); }
+      else if (photoName && onDropPhotoName) onDropPhotoName(index);
+    };
     return html`
       <button type="button" className="photo-slot" onClick=${pick}
         style=${{ width, height, borderRadius: radius, flex: 'none', scrollSnapAlign: 'start' }}>
-        ${src ? html`<img src=${src} alt="" />` : html`<span className="ph-text">${placeholder}</span>`}
+        ${src ? html`<img src=${src} alt="" onError=${() => setFailed(true)} />` : html`<span className="ph-text">${placeholder}</span>`}
         ${src ? html`<span className="ph-clear" onClick=${clear}>×</span>` : null}
         <input ref=${inputRef} type="file" accept="image/*" style=${{ display: 'none' }} onChange=${onChange} />
       </button>
@@ -693,6 +708,9 @@
     };
     const onLinkUrlKey = (e) => { if (e.key === 'Enter') addLink(); };
     const removeLink = (i) => () => patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, links: (s.links || []).filter((_, idx) => idx !== i) } : s) });
+    // Blanks the slot rather than splicing it out, so the remaining photos don't shuffle
+    // left into a different slot than the one they're already showing in.
+    const dropPhotoName = (i) => patch({ spots: state.spots.map(s => s.id === d.id ? { ...s, ph: (s.ph || []).map((p, idx) => idx === i ? null : p) } : s) });
 
     return html`
       <div style=${{ position: 'absolute', inset: 0, zIndex: 20, background: '#131313', display: 'flex', flexDirection: 'column', animation: 'upSheet 320ms cubic-bezier(0.93,0,0.07,1)' }}>
@@ -715,7 +733,7 @@
           </div>
           <div style=${{ padding: '0 16px 16px' }}>
             <div style=${{ display: 'flex', gap: 8, overflowX: 'auto', scrollSnapType: 'x mandatory', paddingBottom: 2 }}>
-              ${[0, 1, 2].map(i => html`<${PhotoSlot} key=${i} spotId=${d.id} index=${i} width=${i === 0 ? 268 : 190} height=${196} radius=${18} placeholder=${i === 0 ? 'drop a photo of ' + d.n : 'photo ' + (i + 1)} bump=${bump} />`)}
+              ${[0, 1, 2].map(i => html`<${PhotoSlot} key=${i} spotId=${d.id} index=${i} width=${i === 0 ? 268 : 190} height=${196} radius=${18} placeholder=${i === 0 ? 'drop a photo of ' + d.n : 'photo ' + (i + 1)} photoName=${(d.ph || [])[i]} onDropPhotoName=${dropPhotoName} bump=${bump} />`)}
             </div>
           </div>
           <div style=${{ padding: '0 16px' }}>
@@ -807,7 +825,7 @@
 
   // ---------- add spot sheet ----------
 
-  function AddSpotSheet({ state, patch, bump }) {
+  function AddSpotSheet({ state, patch }) {
     const f = state.f;
     const gp = f.googlePlace;
     const close = () => patch({ addOpen: false });
@@ -829,7 +847,7 @@
       const details = await window.PinsPlaces.getDetails(r.id);
       patch(prev => {
         if (!details) return { f: { ...prev.f, googleSearching: false } };
-        return { f: { ...prev.f, googleSearching: false, googlePlace: details, addr: details.address || prev.f.addr } };
+        return { f: { ...prev.f, googleSearching: false, googlePlace: { ...details, id: r.id }, addr: details.address || prev.f.addr } };
       });
     };
     const clearGoogle = () => patch({ f: { ...state.f, googlePlace: null } });
@@ -854,24 +872,16 @@
         id, idx: state.spots.length, n: name.toLowerCase(),
         c: f.cat, addr: f.addr.trim() || undefined,
         la, ln, no: f.note, links: f.urls.map(u => u.trim()).filter(Boolean).map(url => ({ url, title: null })), t: [], visited: false, trip: state.tripId,
-        h: (gp && gp.hours) || undefined, p: (gp && gp.price) || undefined
+        h: (gp && gp.hours) || undefined, p: (gp && gp.price) || undefined,
+        // Google photo resource names, rendered on demand via /api/places/photo. Kept as
+        // names (~100 bytes) rather than cached image bytes (~200KB) so a trip's worth of
+        // spots can't exhaust localStorage. gid lets them be re-resolved if they go stale.
+        gid: (gp && gp.id) || undefined, ph: (gp && gp.photoNames) || undefined
       };
       patch({
         spots: state.spots.concat([s]), addOpen: false, sel: s.id, detail: s.id,
         f: { name: '', cat: f.cat, addr: '', urls: [''], note: '', googleResults: [], googleSearching: false, googlePlace: null }
       });
-      if (gp && gp.photoNames && gp.photoNames.length) {
-        gp.photoNames.forEach((photoName, i) => {
-          window.PinsPlaces.fetchPhotoBlob(photoName, 800).then(async (blob) => {
-            if (!blob) return;
-            try {
-              const dataUrl = await S.compressImage(blob);
-              S.savePhoto(id, i, dataUrl);
-              bump();
-            } catch (err) { console.warn('pins: could not save google photo', err); }
-          });
-        });
-      }
     };
 
     return html`
@@ -1463,7 +1473,7 @@
           ? TripsScreen({ state, patch })
           : TripScreen({ state, patch, mapContainerRef, overlayNodes, userLoc, onZoomIn, onZoomOut, onRecenter })}
         ${state.detail ? SpotDetailScreen({ state, patch, bump }) : null}
-        ${state.addOpen ? AddSpotSheet({ state, patch, bump }) : null}
+        ${state.addOpen ? AddSpotSheet({ state, patch }) : null}
         ${state.stayOpen ? StaySheet({ state, patch }) : null}
         ${state.newTripOpen ? NewTripSheet({ state, patch }) : null}
         ${state.confirmDeleteTripId ? DeleteTripSheet({ state, patch }) : null}
