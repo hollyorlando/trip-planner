@@ -7,9 +7,12 @@
 
 *{box-sizing:border-box}
 html{color-scheme:dark}
-html,body{height:100%}
+/* iOS standalone + black-translucent leaves a safe-area-inset-top-tall strip at the
+   bottom that the web view can't paint; WebKit fills it with the document background,
+   so that has to match .app-shell or it reads as a black bar under the home indicator. */
+html,body{height:100%;background:#131313}
 body{
-  margin:0;background:#0b0b0b;color:#fff;
+  margin:0;color:#fff;overscroll-behavior:none;
   font-family:"Character Sans",ui-sans-serif,system-ui,sans-serif;
   -webkit-font-smoothing:antialiased;
 }
@@ -37,6 +40,8 @@ input:focus,textarea:focus{outline:2px solid #fff;outline-offset:0}
   font-size:16px;line-height:1.45;
 }
 @media (min-width:640px){
+  /* on desktop the shell is an inset rounded card, so the page behind it goes darker again */
+  html,body{background:#0b0b0b}
   .app-shell{top:24px;bottom:24px;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
 }
 
