@@ -2,6 +2,7 @@
 window.PinsStorage = (function () {
   const KEY = 'pins-trip-app:v1';
   const PHOTO_PREFIX = 'pins-trip-app:photo:';
+  const MAX_PHOTOS_PER_SPOT = 3;
 
   function load() {
     try {
@@ -38,6 +39,43 @@ window.PinsStorage = (function () {
     try { localStorage.removeItem(photoKey(spotId, i)); } catch (e) {}
   }
 
+  // Photos are cached in localStorage only, so they never leave the device that added
+  // them. These let the sync blob carry them too, piggybacking on the same "one shared
+  // JSON row" mechanism as everything else, so a photo added on one device shows up on
+  // the rest instead of disappearing there.
+  function collectPhotos(spotIds) {
+    const out = [];
+    spotIds.forEach(id => {
+      for (let i = 0; i < MAX_PHOTOS_PER_SPOT; i++) {
+        const dataUrl = loadPhoto(id, i);
+        if (dataUrl) out.push({ id, i, dataUrl });
+      }
+    });
+    return out;
+  }
+
+  // Fills in photos this device doesn't have yet; never overwrites a local one, so an
+  // in-progress local edit can't be clobbered by a stale remote copy.
+  function applyPhotos(list) {
+    if (!list) return;
+    list.forEach(({ id, i, dataUrl }) => {
+      if (!loadPhoto(id, i)) savePhoto(id, i, dataUrl);
+    });
+  }
+
+  // A device that hasn't cached every photo locally (a fresh install, or one that hit
+  // its storage quota partway through applyPhotos) must not push that partial set as
+  // the new synced record — it would erase photos another device already contributed.
+  // Union the last-seen remote set with whatever this device has locally, local
+  // winning on conflicts, then drop anything for a spot that no longer exists.
+  function mergePhotos(remoteList, localList, validSpotIds) {
+    const map = new Map();
+    (remoteList || []).forEach(p => map.set(p.id + ':' + p.i, p));
+    (localList || []).forEach(p => map.set(p.id + ':' + p.i, p));
+    const valid = new Set(validSpotIds);
+    return Array.from(map.values()).filter(p => valid.has(p.id));
+  }
+
   // Downscale + JPEG-compress an uploaded image so it fits comfortably in localStorage.
   function compressImage(file, maxDim = 1000, quality = 0.75) {
     return new Promise((resolve, reject) => {
@@ -59,5 +97,5 @@ window.PinsStorage = (function () {
     });
   }
 
-  return { load, save, loadPhoto, savePhoto, removePhoto, compressImage };
+  return { load, save, loadPhoto, savePhoto, removePhoto, compressImage, collectPhotos, applyPhotos, mergePhotos };
 })();

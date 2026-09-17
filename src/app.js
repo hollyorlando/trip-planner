@@ -1240,7 +1240,7 @@
 
   function App() {
     const [state, setState] = useState(makeInitialState);
-    const [, setPhotoTick] = useState(0);
+    const [photoTick, setPhotoTick] = useState(0);
     const bump = () => setPhotoTick(t => t + 1);
     const patch = (p) => setState(prev => ({ ...prev, ...(typeof p === 'function' ? p(prev) : p) }));
 
@@ -1261,6 +1261,11 @@
     const syncOn = window.PinsSync.isConfigured();
     const [syncReady, setSyncReady] = useState(!syncOn);
     const mergedRef = useRef(false);
+    // Last photo set known to be on the shared row. A device that hasn't cached every
+    // photo locally (fresh install, or one that hit its storage quota partway through
+    // applyPhotos) must union with this before pushing, or it'll erase photos another
+    // device already contributed.
+    const remotePhotosRef = useRef([]);
 
     // Triggers the fade-out once conditions are met; deliberately excludes `boot`
     // from deps so it doesn't re-fire (and cancel the effect below) once boot flips to 'out'.
@@ -1290,10 +1295,16 @@
             stays: remote.stays || state.stays,
             activeStay: remote.activeStay || state.activeStay
           });
+          S.applyPhotos(remote.photos);
+          remotePhotosRef.current = remote.photos || [];
+          bump();
         } else {
+          const photos = S.collectPhotos(state.spots.map(s => s.id));
           await window.PinsSync.saveSharedState({
-            trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay
+            trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay,
+            photos
           });
+          remotePhotosRef.current = photos;
         }
         setSyncReady(true);
       })();
@@ -1303,12 +1314,19 @@
     useEffect(() => {
       if (!syncOn || !syncReady) return;
       const t = setTimeout(() => {
+        const spotIds = state.spots.map(s => s.id);
+        const photos = S.mergePhotos(remotePhotosRef.current, S.collectPhotos(spotIds), spotIds);
+        remotePhotosRef.current = photos;
         window.PinsSync.saveSharedState({
-          trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay
+          trips: state.trips, spots: state.spots, stays: state.stays, activeStay: state.activeStay,
+          photos
         });
       }, 800);
       return () => clearTimeout(t);
-    }, [state.trips, state.spots, state.stays, state.activeStay, syncReady]);
+      // photoTick isn't part of the payload directly, but a saved/cleared photo needs to
+      // re-trigger this push the same way an edited spot does — it only touches
+      // localStorage, so none of the other deps would otherwise notice it changed.
+    }, [state.trips, state.spots, state.stays, state.activeStay, syncReady, photoTick]);
 
     // ---- user's live location (for the "you are here" map dot + distance-to-pin) ----
     const [userLoc, setUserLoc] = useState(null);
