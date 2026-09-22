@@ -7,6 +7,7 @@ window.PinsData = (function () {
     bakery:     { label: 'cafés + bakeries', fill: '#fff59e', ink: '#131313', soft: '#2d2b1d' },
     drinks:     { label: 'drinks + wine',    fill: '#d90000', ink: '#ffffff', soft: '#2f1616' },
     todo:       { label: 'things to do',     fill: '#aed900', ink: '#131313', soft: '#242b12' },
+    beach:      { label: 'beaches',          fill: '#abf5ed', ink: '#131313', soft: '#1a2e2d' },
     shop:       { label: 'shops',            fill: '#f28500', ink: '#131313', soft: '#2f2214' },
     experience: { label: 'experiences',      fill: '#7db4ff', ink: '#131313', soft: '#1b2434' }
   };
